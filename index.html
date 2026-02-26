@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="ro">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Import DVI / MRN – Extractor</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<div class="container">
+
+  <!-- HEADER -->
+  <header>
+    <h1>📦 Import DVI / MRN – Extractor</h1>
+    <p>Încarcă declarații vamale PDF → extrage automat câmpurile → exportă Excel</p>
+  </header>
+
+  <!-- UPLOAD -->
+  <div class="card">
+    <h2>📂 Încărcare fișiere PDF</h2>
+    <div class="drop-zone" id="drop-zone">
+      <input type="file" id="file-input" accept=".pdf" multiple>
+      <div class="icon">📄</div>
+      <p><strong>Drag & Drop</strong> fișiere PDF aici sau <strong>click</strong> pentru a selecta</p>
+      <p class="hint">Declarații vamale cu text selectabil (fără OCR)</p>
+    </div>
+
+    <!-- FILE LIST -->
+    <ul class="file-list" id="file-list"></ul>
+
+    <!-- PROGRESS -->
+    <div class="progress-wrap" id="progress-wrap">
+      <div class="progress-bar-bg">
+        <div class="progress-bar-fill" id="progress-fill"></div>
+      </div>
+      <div class="progress-text" id="progress-text"></div>
+    </div>
+
+    <!-- BUTTONS -->
+    <div class="btn-row">
+      <button class="btn btn-success" id="btn-export" disabled>📥 Export XLSX</button>
+      <button class="btn btn-outline" id="btn-clear">🗑️ Clear</button>
+    </div>
+  </div>
+
+  <!-- PREVIEW TABLE -->
+  <div class="card" id="preview-section" style="display:none;">
+    <h2>📋 Preview date extrase</h2>
+    <div class="table-wrap">
+      <table class="preview-table">
+        <thead>
+          <tr></tr>
+        </thead>
+        <tbody id="preview-tbody"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- WARNINGS -->
+  <div class="card">
+    <h2>⚠️ Warnings</h2>
+    <div id="warnings-container">
+      <p style="color:var(--text-muted); font-size:.85rem;">Niciun fișier procesat încă.</p>
+    </div>
+  </div>
+
+</div>
+
+<!-- pdf.js (legacy UMD build, sets window.pdfjsLib) -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+
+<!-- SheetJS -->
+<script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
+
+<!-- App -->
+<script src="app.js"></script>
+
+</body>
+</html>
