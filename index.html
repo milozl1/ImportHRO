@@ -40,6 +40,7 @@
     <!-- BUTTONS -->
     <div class="btn-row">
       <button class="btn btn-success" id="btn-export" disabled>📥 Export XLSX</button>
+      <button class="btn btn-primary" id="btn-zip" disabled>📦 Export ZIP (MRN rename)</button>
       <button class="btn btn-outline" id="btn-clear">🗑️ Clear</button>
     </div>
   </div>
@@ -50,7 +51,6 @@
     <div class="table-wrap">
       <table class="preview-table">
         <thead>
-          <tr></tr>
         </thead>
         <tbody id="preview-tbody"></tbody>
       </table>
@@ -72,6 +72,9 @@
 
 <!-- SheetJS -->
 <script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
+
+<!-- JSZip -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 
 <!-- App -->
 <script src="app.js"></script>

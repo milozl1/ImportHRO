@@ -18,7 +18,7 @@ global.document = doc;
 const {
   normalizeText, parseFields, emptyFields, patterns, ro,
   extractAWB, extractExportator, extractTaraExp, extractAwbLunaAn,
-  extractFactura, extractLocatie, COLUMNS
+  extractFactura, extractLocatie, extractRegimUnificat, COLUMNS
 } = require('./app.js');
 
 // ─── Test infrastructure ────────────────────────────────────────────────────
@@ -73,7 +73,13 @@ Moneda de facturare - [14 05] EUR
 Cuantumul total facturat - [14 06] 8802.5
 Țara de expediere - [16 06] CH
 
-Cod TARIC unificat 8536693000`;
+Cod TARIC unificat 8536693000
+
+SEGMENT MARFURI
+Nr. art. 1
+Regimul solicitat - [11 09] 40
+Regimul anterior - [11 09] 00
+Regim unificat 4000`;
 
 const PDF2_TEXT = `DECLARAȚIE VAMALĂ DE IMPORT
 SEGMENT GENERAL
@@ -114,7 +120,13 @@ Moneda de facturare - [14 05] USD
 Cuantumul total facturat - [14 06] 32205.6
 Țara de expediere - [16 06] GB
 
-Cod TARIC unificat 3810100000`;
+Cod TARIC unificat 3810100000
+
+SEGMENT MARFURI
+Nr. art. 1
+Regimul solicitat - [11 09] 40
+Regimul anterior - [11 09] 00
+Regim unificat 4000`;
 
 // Text with cedilla variants (ş/ţ instead of ș/ț)
 const PDF3_CEDILLA = `DECLARAŢIE VAMALĂ DE IMPORT
@@ -137,7 +149,116 @@ Moneda de facturare - [14 05] EUR
 Cuantumul total facturat - [14 06] 1234.56
 Ţara de expediere - [16 06] DE
 
-Cod TARIC unificat 8471300000`;
+Cod TARIC unificat 8471300000
+
+SEGMENT MARFURI
+Nr. art. 1
+Regimul solicitat - [11 09] 40
+Regimul anterior - [11 09] 71
+Regim unificat 4071`;
+
+// ─── PDF4: N705 transport document ─────────────────────────────────────────
+const PDF4_N705 = `DECLARAȚIE VAMALĂ DE IMPORT
+SEGMENT GENERAL
+Importatorul - [13 04] Nr: RO16297090
+Orașul GHIRODA
+MRN 26ROTM87200009RYR3 26/02/2026
+Dată liber vamă 26/02/2026
+
+SEGMENT TRANSPORT Nr. 1
+Document justificativ - [12 03]
+1. N380 / IKD-HELLA-ROM-S014/13.12.2025 / / /
+Documentul de transport - [12 05]
+1. N730 / CMR
+2. N705 / NGB25SE14687
+Exportatorul - [13 01] Nr:
+Numele DAICEL SAFETY SYSTEMS EUROPE
+Țara HU
+Moneda de facturare - [14 05] EUR
+Cuantumul total facturat - [14 06] 55000.00
+Țara de expediere - [16 06] HU
+
+Cod TARIC unificat 8708950000
+
+SEGMENT MARFURI
+Nr. art. 1
+Regimul solicitat - [11 09] 40
+Regimul anterior - [11 09] 00
+Regim unificat 4000`;
+
+// ─── PDF5: N787 transport document (picking list) ───────────────────────────
+const PDF5_N787 = `DECLARAȚIE VAMALĂ DE IMPORT
+SEGMENT GENERAL
+Importatorul - [13 04] Nr: RO16297090
+Orașul GHIRODA
+MRN 26ROTM87200010ABC5 26/02/2026
+Dată liber vamă 26/02/2026
+
+SEGMENT TRANSPORT Nr. 1
+Document justificativ - [12 03]
+1. N380 / FACT-2026-100 / / /
+Documentul de transport - [12 05]
+1. N787 / 296. Picking list Hella 26.02.2026 -AR
+Exportatorul - [13 01] Nr:
+Numele AUTOMOTIVE PARTS SRL
+Țara DE
+Moneda de facturare - [14 05] EUR
+Cuantumul total facturat - [14 06] 12500.00
+Țara de expediere - [16 06] DE
+
+Cod TARIC unificat 8708299000
+
+SEGMENT MARFURI
+Nr. art. 1
+Regimul solicitat - [11 09] 40
+Regimul anterior - [11 09] 71
+Regim unificat 4071`;
+
+// PDF6: Multi-invoice N380 with comma-separated values (DHL_import_1463107122 style)
+const PDF6_MULTI_COMMA = `DECLARAȚIE VAMALĂ DE IMPORT
+SEGMENT GENERAL
+Importatorul - [13 04] Nr: RO16297090
+Orașul GHIRODA
+MRN 26ROTM87300008ETR0 17/02/2026
+Dată liber vamă 17/02/2026
+
+SEGMENT TRANSPORT Nr. 1
+Document justificativ - [12 03]
+1. N380 / NL26020303, -304 / / 2026-02-17 00:00:00.0 /
+Documentul de transport - [12 05]
+1. N740 / 1463107122
+Exportatorul - [13 01] Nr:
+Numele RAYBEN TECHNOLOGIES HK LIMITED
+Țara HK
+Moneda de facturare - [14 05] EUR
+Cuantumul total facturat - [14 06] 2834.91
+Țara de expediere - [16 06] HK
+
+Cod TARIC unificat 8517140000
+Regim unificat 4000`;
+
+// PDF7: Multi-invoice N380 with semicolon-separated values (user screenshot style)
+const PDF7_MULTI_SEMICOLON = `DECLARAȚIE VAMALĂ DE IMPORT
+SEGMENT GENERAL
+Importatorul - [13 04] Nr: RO16297090
+Orașul TIMISOARA
+MRN 26ROTM87300009XYZ1 12/02/2026
+Dată liber vamă 12/02/2026
+
+SEGMENT TRANSPORT Nr. 1
+Document justificativ - [12 03]
+1. N380 / 20199698; 20200760/12.02.2026 / / /
+Documentul de transport - [12 05]
+1. N740 / 9988776655
+Exportatorul - [13 01] Nr:
+Numele EXAMPLE EXPORT CO
+Țara CN
+Moneda de facturare - [14 05] EUR
+Cuantumul total facturat - [14 06] 5500.00
+Țara de expediere - [16 06] CN
+
+Cod TARIC unificat 3926909790
+Regim unificat 4000`;
 
 console.log('═══════════════════════════════════════════════');
 console.log('  Running automated tests for app.js');
@@ -156,7 +277,8 @@ const ef = emptyFields();
 assertEqual(ef.gratis, 'NU', 'gratis default is NU');
 assertEqual(ef.dvi, '', 'dvi default is empty');
 assertEqual(ef.codTaric, '', 'codTaric default is empty');
-assert(Object.keys(ef).length === 12, 'emptyFields has 12 keys, got ' + Object.keys(ef).length);
+assert(Object.keys(ef).length === 13, 'emptyFields has 13 keys, got ' + Object.keys(ef).length);
+assert(ef.hasOwnProperty('regimUnificat'), 'emptyFields has regimUnificat');
 
 // ─── TEST GROUP: PDF1 parsing ───────────────────────────────────────────────
 console.log('▸ PDF1 – DHL / PRECI-DIP');
@@ -173,6 +295,7 @@ assertEqual(f1.valoare, 8802.5, 'PDF1 Valoare');
 assertEqual(f1.awbLunaAn, 'AWB - Februarie 2026', 'PDF1 AWB Luna An');
 assertEqual(f1.nrFactura, '90022227', 'PDF1 Nr. Factură');
 assertEqual(f1.codTaric, '8536693000', 'PDF1 Cod TARIC');
+assertEqual(f1.regimUnificat, '4000', 'PDF1 Regim unificat');
 assertEqual(f1.locatie, 'GHIRODA', 'PDF1 Locație');
 assertEqual(f1.gratis, 'NU', 'PDF1 Gratis');
 
@@ -191,6 +314,7 @@ assertEqual(f2.valoare, 32205.6, 'PDF2 Valoare');
 assertEqual(f2.awbLunaAn, 'AWB - Februarie 2026', 'PDF2 AWB Luna An');
 assertEqual(f2.nrFactura, 'CI020226969A', 'PDF2 Nr. Factură (N380 priority)');
 assertEqual(f2.codTaric, '3810100000', 'PDF2 Cod TARIC');
+assertEqual(f2.regimUnificat, '4000', 'PDF2 Regim unificat');
 assertEqual(f2.locatie, 'GHIRODA', 'PDF2 Locație');
 assertEqual(f2.gratis, 'NU', 'PDF2 Gratis');
 
@@ -207,6 +331,7 @@ assertEqual(f3.moneda, 'EUR', 'PDF3 Moneda');
 assertEqual(f3.valoare, 1234.56, 'PDF3 Valoare');
 assertEqual(f3.nrFactura, 'INV-2026-001', 'PDF3 Factura');
 assertEqual(f3.codTaric, '8471300000', 'PDF3 Cod TARIC');
+assertEqual(f3.regimUnificat, '4071', 'PDF3 Regim unificat (cedilla text)');
 assert(f3.locatie.length > 0, 'PDF3 Locație extracted (cedilla Oraşul): "' + f3.locatie + '"');
 assertEqual(f3.dataMRN, '25/03/2026', 'PDF3 Data MRN');
 assertEqual(f3.awbLunaAn, 'AWB - Martie 2026', 'PDF3 AWB Luna An');
@@ -231,12 +356,96 @@ const testRe5 = ro('hello\\s+world');
 assert(testRe5.test('hello  world'), 'ro() plain pattern works');
 assert(!testRe5.test('helloworld'), 'ro() plain pattern rejects mismatch');
 
+// ─── TEST GROUP: PDF4 – N705 transport ───────────────────────────────────────
+console.log('▸ PDF4 – N705 transport');
+const r4 = parseFields(PDF4_N705);
+const f4 = r4.fields;
+
+assertEqual(f4.dvi, '26ROTM87200009RYR3', 'PDF4 MRN');
+assertEqual(f4.dataMRN, '26/02/2026', 'PDF4 Data MRN');
+assertEqual(f4.awb, 'NGB25SE14687', 'PDF4 AWB from N705');
+assertEqual(f4.exportator, 'DAICEL SAFETY SYSTEMS EUROPE', 'PDF4 Exportator');
+assertEqual(f4.taraExp, 'HU', 'PDF4 Țara Exp');
+assertEqual(f4.moneda, 'EUR', 'PDF4 Moneda');
+assertEqual(f4.valoare, 55000, 'PDF4 Valoare');
+assertEqual(f4.nrFactura, 'IKD-HELLA-ROM-S014', 'PDF4 Nr. Factură');
+assertEqual(f4.codTaric, '8708950000', 'PDF4 Cod TARIC');
+assertEqual(f4.regimUnificat, '4000', 'PDF4 Regim unificat');
+assertEqual(f4.locatie, 'GHIRODA', 'PDF4 Locație');
+assertEqual(f4.gratis, 'NU', 'PDF4 Gratis');
+
+// ─── TEST GROUP: PDF5 – N787 transport (picking list) ────────────────────────
+console.log('▸ PDF5 – N787 transport (picking list)');
+const r5 = parseFields(PDF5_N787);
+const f5 = r5.fields;
+
+assertEqual(f5.dvi, '26ROTM87200010ABC5', 'PDF5 MRN');
+assertEqual(f5.dataMRN, '26/02/2026', 'PDF5 Data MRN');
+assertEqual(f5.awb, '296. Picking list Hella 26.02.2026 -AR', 'PDF5 AWB from N787');
+assertEqual(f5.exportator, 'AUTOMOTIVE PARTS SRL', 'PDF5 Exportator');
+assertEqual(f5.taraExp, 'DE', 'PDF5 Țara Exp');
+assertEqual(f5.moneda, 'EUR', 'PDF5 Moneda');
+assertEqual(f5.valoare, 12500, 'PDF5 Valoare');
+assertEqual(f5.nrFactura, 'FACT-2026-100', 'PDF5 Nr. Factură');
+assertEqual(f5.codTaric, '8708299000', 'PDF5 Cod TARIC');
+assertEqual(f5.regimUnificat, '4071', 'PDF5 Regim unificat 4071');
+assertEqual(f5.locatie, 'GHIRODA', 'PDF5 Locație');
+assertEqual(f5.gratis, 'NU', 'PDF5 Gratis');
+
+// ─── TEST GROUP: PDF6 – Multi-invoice comma-separated ────────────────────────
+console.log('▸ PDF6 – Multi-invoice comma-separated');
+const r6 = parseFields(PDF6_MULTI_COMMA);
+const f6 = r6.fields;
+
+assertEqual(f6.dvi, '26ROTM87300008ETR0', 'PDF6 MRN');
+assertEqual(f6.dataMRN, '17/02/2026', 'PDF6 Data MRN');
+assertEqual(f6.awb, '1463107122', 'PDF6 AWB');
+assertEqual(f6.exportator, 'RAYBEN TECHNOLOGIES HK LIMITED', 'PDF6 Exportator');
+assertEqual(f6.taraExp, 'HK', 'PDF6 Țara Exp');
+assertEqual(f6.moneda, 'EUR', 'PDF6 Moneda');
+assertEqual(f6.valoare, 2834.91, 'PDF6 Valoare');
+assertEqual(f6.nrFactura, 'NL26020303, -304', 'PDF6 Nr. Factură (comma-separated)');
+assertEqual(f6.codTaric, '8517140000', 'PDF6 Cod TARIC');
+assertEqual(f6.regimUnificat, '4000', 'PDF6 Regim unificat');
+assertEqual(f6.locatie, 'GHIRODA', 'PDF6 Locație');
+assertEqual(f6.gratis, 'NU', 'PDF6 Gratis');
+
+// ─── TEST GROUP: PDF7 – Multi-invoice semicolon-separated ────────────────────
+console.log('▸ PDF7 – Multi-invoice semicolon-separated');
+const r7 = parseFields(PDF7_MULTI_SEMICOLON);
+const f7 = r7.fields;
+
+assertEqual(f7.dvi, '26ROTM87300009XYZ1', 'PDF7 MRN');
+assertEqual(f7.dataMRN, '12/02/2026', 'PDF7 Data MRN');
+assertEqual(f7.awb, '9988776655', 'PDF7 AWB');
+assertEqual(f7.exportator, 'EXAMPLE EXPORT CO', 'PDF7 Exportator');
+assertEqual(f7.taraExp, 'CN', 'PDF7 Țara Exp');
+assertEqual(f7.moneda, 'EUR', 'PDF7 Moneda');
+assertEqual(f7.valoare, 5500, 'PDF7 Valoare');
+assertEqual(f7.nrFactura, '20199698; 20200760', 'PDF7 Nr. Factură (semicolon-separated)');
+assertEqual(f7.codTaric, '3926909790', 'PDF7 Cod TARIC');
+assertEqual(f7.regimUnificat, '4000', 'PDF7 Regim unificat');
+assertEqual(f7.locatie, 'TIMISOARA', 'PDF7 Locație');
+assertEqual(f7.gratis, 'NU', 'PDF7 Gratis');
+
 // ─── TEST GROUP: Individual extractors ──────────────────────────────────────
 console.log('▸ extractAWB');
 assertEqual(extractAWB(PDF1_TEXT), '6646529444', 'extractAWB PDF1 (N740)');
 assertEqual(extractAWB(PDF2_TEXT), '344501879', 'extractAWB PDF2 (N741)');
 assertEqual(extractAWB(PDF3_CEDILLA), '9998887776', 'extractAWB PDF3 (N740)');
 assertEqual(extractAWB('no transport section here'), '', 'extractAWB empty on no match');
+assertEqual(extractAWB(PDF4_N705), 'NGB25SE14687', 'extractAWB PDF4 (N705)');
+assertEqual(extractAWB(PDF5_N787), '296. Picking list Hella 26.02.2026 -AR', 'extractAWB PDF5 (N787)');
+// N730 CMR should be skipped if N705 is first match by position — in PDF4 N730 comes first but N705 second
+// The function should pick the first one in document order (N730/CMR first)
+// But in actual data N705 has the real AWB code, so let's verify with standalone test
+const textN705Only = `SEGMENT TRANSPORT Nr. 1\nDocumentul de transport - [12 05]\n1. N705 / ABC123456\n`;
+assertEqual(extractAWB(textN705Only), 'ABC123456', 'extractAWB standalone N705');
+const textN730Only = `SEGMENT TRANSPORT Nr. 1\nDocumentul de transport - [12 05]\n1. N730 / CMR-SHIPMENT-99\n`;
+assertEqual(extractAWB(textN730Only), 'CMR-SHIPMENT-99', 'extractAWB standalone N730');
+// Regression: pdf.js merges columns so AWB line may have "Antrepozit - [12 11]" appended
+const textAWBNoise = `SEGMENT TRANSPORT Nr. 1\nDocumentul de transport - [12 05]\n1. N740 / 6646529444 Antrepozit - [12 11]\n`;
+assertEqual(extractAWB(textAWBNoise), '6646529444', 'extractAWB strips trailing Antrepozit label');
 
 console.log('▸ extractExportator');
 assertEqual(extractExportator(PDF1_TEXT), 'PRECI-DIP SA', 'extractExportator PDF1');
@@ -266,6 +475,8 @@ console.log('▸ extractFactura');
 assertEqual(extractFactura(PDF1_TEXT), '90022227', 'extractFactura PDF1 (N380)');
 assertEqual(extractFactura(PDF2_TEXT), 'CI020226969A', 'extractFactura PDF2 (N380 before N325)');
 assertEqual(extractFactura(PDF3_CEDILLA), 'INV-2026-001', 'extractFactura PDF3');
+assertEqual(extractFactura(PDF6_MULTI_COMMA), 'NL26020303, -304', 'extractFactura PDF6 (comma-separated)');
+assertEqual(extractFactura(PDF7_MULTI_SEMICOLON), '20199698; 20200760', 'extractFactura PDF7 (semicolon-separated)');
 assertEqual(extractFactura('no invoices here'), '', 'extractFactura empty on no match');
 
 console.log('▸ extractLocatie');
@@ -279,6 +490,15 @@ Orașul BAIA MARE
 Codul poștal 430000`;
 assertEqual(extractLocatie(textMultiWordCity), 'BAIA MARE', 'extractLocatie multi-word city');
 
+console.log('▸ extractRegimUnificat');
+assertEqual(extractRegimUnificat(PDF1_TEXT), '4000', 'extractRegimUnificat PDF1');
+assertEqual(extractRegimUnificat(PDF2_TEXT), '4000', 'extractRegimUnificat PDF2');
+assertEqual(extractRegimUnificat(PDF3_CEDILLA), '4071', 'extractRegimUnificat PDF3');
+assertEqual(extractRegimUnificat(PDF4_N705), '4000', 'extractRegimUnificat PDF4');
+assertEqual(extractRegimUnificat(PDF5_N787), '4071', 'extractRegimUnificat PDF5');
+assertEqual(extractRegimUnificat('no regim here'), '', 'extractRegimUnificat empty on no match');
+assertEqual(extractRegimUnificat('Regim unificat 9999'), '9999', 'extractRegimUnificat generic 4-digit');
+
 // ─── TEST GROUP: Warnings correctness ───────────────────────────────────────
 console.log('▸ Warnings');
 // Full PDFs should have zero or minimal warnings
@@ -286,10 +506,11 @@ assert(r1.warnings.length === 0, 'PDF1 has no warnings, got: ' + JSON.stringify(
 assert(r2.warnings.length === 0, 'PDF2 has no warnings, got: ' + JSON.stringify(r2.warnings));
 // Empty text should warn about all fields
 const emptyWarnings = parseFields('').warnings;
-assert(emptyWarnings.length >= 8, 'Empty text produces ≥8 warnings, got ' + emptyWarnings.length);
+assert(emptyWarnings.length >= 9, 'Empty text produces ≥9 warnings, got ' + emptyWarnings.length);
 assert(emptyWarnings.some(w => /MRN/i.test(w)), 'Empty text warns about MRN');
 assert(emptyWarnings.some(w => /AWB/i.test(w)), 'Empty text warns about AWB');
 assert(emptyWarnings.some(w => /Exportator/i.test(w)), 'Empty text warns about Exportator');
+assert(emptyWarnings.some(w => /Regim/i.test(w)), 'Empty text warns about Regim unificat');
 
 // ─── TEST GROUP: normalizeText edge cases ───────────────────────────────────
 console.log('▸ normalizeText edge cases');
@@ -338,12 +559,13 @@ assertEqual(rDec.fields.awbLunaAn, 'AWB - Decembrie 2025', 'December extraction'
 
 // ─── TEST GROUP: COLUMNS config ─────────────────────────────────────────────
 console.log('▸ COLUMNS config');
-assert(COLUMNS.length === 12, 'COLUMNS has 12 entries, got ' + COLUMNS.length);
+assert(COLUMNS.length === 13, 'COLUMNS has 13 entries, got ' + COLUMNS.length);
 assertEqual(COLUMNS[COLUMNS.length - 1].key, 'gratis', 'Last column is gratis');
 assertEqual(COLUMNS[COLUMNS.length - 1].type, 'select', 'Gratis column is select type');
 assert(COLUMNS.find(c => c.key === 'codTaric'), 'COLUMNS contains codTaric');
 assert(COLUMNS.find(c => c.key === 'dataMRN'), 'COLUMNS contains dataMRN');
 assert(COLUMNS.find(c => c.key === 'locatie'), 'COLUMNS contains locatie');
+assert(COLUMNS.find(c => c.key === 'regimUnificat'), 'COLUMNS contains regimUnificat');
 // Verify column order matches emptyFields keys
 const colKeys = COLUMNS.map(c => c.key);
 assert(colKeys.indexOf('dvi') < colKeys.indexOf('dataMRN'), 'dvi before dataMRN');

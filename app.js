@@ -17,7 +17,7 @@ const patterns = {
   mrn: /MRN\s+(\d{2}[A-Z]{2}[A-Z0-9]{10,20})/i,
   dataMRN: /MRN\s+\S+\s+(\d{1,2})[\/.\-](\d{1,2})[\/.\-](\d{4})/i,
   awbSection: ro('Documentul\\s+de\\s+transport\\s*-\\s*\\[12\\s*05\\]'),
-  awbLine: /N74[01]\s*\/\s*([A-Z0-9][A-Z0-9\-]{2,})/i,
+  awbLine: /N(?:74[01]|705|730|787)\s*\/\s*([A-Z0-9][A-Z0-9\-. ]{2,})/i,
   exportatorSection: ro('Exportatorul\\s*-\\s*\\[13\\s*01\\]'),
   moneda: ro('Moneda\\s+de\\s+facturare\\s*-\\s*\\[14\\s*05\\]\\s+([A-Z]{3})'),
   valoare: ro('Cuantumul\\s+total\\s+facturat\\s*-\\s*\\[14\\s*06\\]\\s+([\\d]+(?:[.,]\\d+)?)'),
@@ -27,6 +27,7 @@ const patterns = {
   codTaric: /Cod\s+TARIC\s+unificat\s+(\d{6,10})/i,
   importatorSection: ro('Importatorul\\s*-\\s*\\[13\\s*04\\]'),
   taraExpediere: ro('Țara\\s+de\\s+expedi(?:ere|ție)\\s*-?\\s*(?:\\[16\\s*06\\])?\\s+([A-Z]{2})'),
+  regimUnificat: /Regim\s+unificat\s+(\d{4})/i,
 };
 
 const MONTHS_RO = [
@@ -74,8 +75,10 @@ function setupDropZone() {
 function setupButtons() {
   const btnExport = document.getElementById('btn-export');
   const btnClear = document.getElementById('btn-clear');
+  const btnZip = document.getElementById('btn-zip');
   if (btnExport) btnExport.addEventListener('click', () => exportXlsx(fileRows));
   if (btnClear) btnClear.addEventListener('click', clearAll);
+  if (btnZip) btnZip.addEventListener('click', () => exportZip(fileRows));
 }
 
 // ─── READ FILES ─────────────────────────────────────────────────────────────
@@ -133,6 +136,8 @@ async function readFiles(files) {
   renderPreview(fileRows);
   renderWarnings(fileRows);
   document.getElementById('btn-export').disabled = false;
+  var zipBtn = document.getElementById('btn-zip');
+  if (zipBtn) zipBtn.disabled = false;
 }
 
 function setFileStatus(liId, status) {
@@ -189,7 +194,7 @@ function emptyFields() {
   return {
     dvi: '', dataMRN: '', awb: '', exportator: '', taraExp: '',
     moneda: '', valoare: '', awbLunaAn: '', nrFactura: '',
-    codTaric: '', locatie: '', gratis: 'NU'
+    codTaric: '', regimUnificat: '', locatie: '', gratis: 'NU'
   };
 }
 
@@ -244,11 +249,15 @@ function parseFields(rawText) {
   if (taricMatch) f.codTaric = taricMatch[1].trim();
   else warnings.push('Cod TARIC missing');
 
-  // 10) Locatie
+  // 10) Regim unificat
+  f.regimUnificat = extractRegimUnificat(text);
+  if (!f.regimUnificat) warnings.push('Regim unificat missing');
+
+  // 11) Locatie
   f.locatie = extractLocatie(text);
   if (!f.locatie) warnings.push('Locație missing');
 
-  // 11) Gratis
+  // 12) Gratis
   f.gratis = 'NU';
 
   return { fields: f, warnings };
@@ -258,16 +267,36 @@ function parseFields(rawText) {
 
 function extractAWB(text) {
   const transportIdx = text.search(/SEGMENT\s+TRANSPORT/i);
-  if (transportIdx < 0) {
-    const m = text.match(patterns.awbLine);
-    return m ? m[1].trim() : '';
+  const searchText = transportIdx >= 0 ? text.substring(transportIdx) : text;
+  const docIdx = searchText.search(patterns.awbSection);
+  if (docIdx < 0) {
+    const m = searchText.match(patterns.awbLine);
+    return m ? cleanAWB(m[1]) : '';
   }
-  const transportText = text.substring(transportIdx);
-  const docIdx = transportText.search(patterns.awbSection);
-  if (docIdx < 0) return '';
-  const win = transportText.substring(docIdx, docIdx + 500);
-  const m = win.match(patterns.awbLine);
-  return m ? m[1].trim() : '';
+  // Search the window after "Documentul de transport - [12 05]"
+  const win = searchText.substring(docIdx, docIdx + 500);
+  const lineRe = /N(74[01]|705|730|787)\s*\/\s*([A-Z0-9][A-Z0-9\-. ]{2,})/gi;
+  const candidates = [];
+  let match;
+  while ((match = lineRe.exec(win)) !== null) {
+    candidates.push({ code: match[1], value: cleanAWB(match[2]) });
+  }
+  if (candidates.length === 0) return '';
+  // Priority: N740/N741 > N705 > N787 > N730
+  // N730 is generic (CMR), prefer specific codes
+  const priority = { '740': 1, '741': 1, '705': 2, '787': 3, '730': 4 };
+  candidates.sort((a, b) => (priority[a.code] || 9) - (priority[b.code] || 9));
+  return candidates[0].value;
+}
+
+function cleanAWB(raw) {
+  // Trim and remove trailing noise (slashes, excess spaces)
+  let v = raw.replace(/\s*\/\s*$/, '').replace(/\s{2,}/g, ' ').trim();
+  // pdf.js merges adjacent PDF columns, so AWB values may be followed by a
+  // section label fragment like "Antrepozit -" (Title-case word then " -").
+  // Strip such trailing label fragments.
+  v = v.replace(/(?:\s+[A-Z][a-z]\w*)+\s*-\s*$/, '').trim();
+  return v;
 }
 
 function extractExportator(text) {
@@ -332,11 +361,28 @@ function extractFactura(text) {
   const nextRe = ro('Documentul\\s+de\\s+transport|Exportatorul|Loca[țt]ia\\s+m[aă]rfurilor');
   const nextIdx = afterDJ.search(nextRe);
   const win = nextIdx > 0 ? afterDJ.substring(0, nextIdx) : afterDJ.substring(0, 1500);
-  const n380 = win.match(/N380\s*\/\s*([A-Z0-9][A-Z0-9\-\/.]*?)(?:\s*\/|\s{2,}|\n|$)/i);
-  if (n380) return n380[1].trim();
-  const n325 = win.match(/N325\s*\/\s*(?:F\.?\s*TR\.?\s*)?([A-Z0-9][A-Z0-9\-\/.]*?)(?:\s*\/|\s{2,}|\n|$)/i);
-  if (n325) return n325[1].trim();
+  // Capture everything between "N380 / " and " / /" (the next double-slash delimiter)
+  const n380 = win.match(/N380\s*\/\s*(.*?)\s*\/\s*\//i);
+  if (n380) {
+    let val = n380[1].trim();
+    // Strip trailing date in format /DD.MM.YYYY or /YYYY-MM-DD... (attached to last invoice)
+    val = val.replace(/\/\s*\d{2}\.\d{2}\.\d{4}\s*$/, '').trim();
+    val = val.replace(/\/\s*\d{4}-\d{2}-\d{2}[\s\d:.]*$/, '').trim();
+    if (val) return val;
+  }
+  const n325 = win.match(/N325\s*\/\s*(.*?)\s*\/\s*\//i);
+  if (n325) {
+    let val = n325[1].trim();
+    val = val.replace(/\/\s*\d{2}\.\d{2}\.\d{4}\s*$/, '').trim();
+    val = val.replace(/\/\s*\d{4}-\d{2}-\d{2}[\s\d:.]*$/, '').trim();
+    if (val) return val;
+  }
   return '';
+}
+
+function extractRegimUnificat(text) {
+  const m = text.match(patterns.regimUnificat);
+  return m ? m[1].trim() : '';
 }
 
 function extractLocatie(text) {
@@ -370,6 +416,7 @@ const COLUMNS = [
   { key: 'awbLunaAn',  label: 'AWB - Luna An' },
   { key: 'nrFactura',  label: 'Nr. Factură' },
   { key: 'codTaric',   label: 'Cod TARIC' },
+  { key: 'regimUnificat', label: 'Regim unificat' },
   { key: 'locatie',    label: 'Locație' },
   { key: 'gratis',     label: 'Gratis', type: 'select', options: ['NU', 'DA'] },
 ];
@@ -377,14 +424,40 @@ const COLUMNS = [
 // ─── RENDER PREVIEW TABLE ───────────────────────────────────────────────────
 function renderPreview(rows) {
   const section = document.getElementById('preview-section');
-  const thead = document.querySelector('#preview-section thead tr');
+  const thead = document.querySelector('#preview-section thead');
   const tbody = document.getElementById('preview-tbody');
 
-  // Build header dynamically
-  thead.innerHTML = '<th>#</th><th>Fișier</th>' + COLUMNS.map(c => '<th>' + c.label + '</th>').join('');
-  tbody.innerHTML = '';
+  // Build header row
+  thead.innerHTML = '';
+  const headerRow = document.createElement('tr');
+  headerRow.innerHTML = '<th>#</th><th>Fișier</th>' + COLUMNS.map(c => '<th>' + c.label + '</th>').join('');
+  thead.appendChild(headerRow);
 
-  rows.forEach((row, idx) => {
+  // Build filter row
+  const filterRow = document.createElement('tr');
+  filterRow.className = 'filter-row';
+  filterRow.innerHTML = '<th></th><th><input type="text" class="col-filter" data-col="fileName" placeholder="🔍"></th>' +
+    COLUMNS.map(c => '<th><input type="text" class="col-filter" data-col="' + c.key + '" placeholder="🔍"></th>').join('');
+  thead.appendChild(filterRow);
+
+  renderTableRows(rows, tbody);
+
+  // Bind filter events
+  thead.querySelectorAll('.col-filter').forEach(input => {
+    input.addEventListener('input', function() {
+      applyFilters(rows, tbody, thead);
+    });
+  });
+
+  section.style.display = 'block';
+}
+
+function renderTableRows(rows, tbody, visibleIndices) {
+  tbody.innerHTML = '';
+  const indices = visibleIndices || rows.map((_, i) => i);
+
+  indices.forEach((idx) => {
+    const row = rows[idx];
     const f = row.fields || emptyFields();
     const tr = document.createElement('tr');
     let html = '<td>' + (idx + 1) + '</td><td>' + escHtml(row.fileName) + '</td>';
@@ -406,8 +479,11 @@ function renderPreview(rows) {
   });
 
   // Bind editable events
+  bindEditableEvents(tbody);
+}
+
+function bindEditableEvents(tbody) {
   tbody.querySelectorAll('.editable').forEach(el => {
-    // 'change' fires on blur/enter — safe for numeric parse
     el.addEventListener('change', function(e) {
       const idx = parseInt(e.target.dataset.idx);
       const field = e.target.dataset.field;
@@ -418,7 +494,6 @@ function renderPreview(rows) {
       }
       fileRows[idx].fields[field] = val;
     });
-    // 'input' fires on every keystroke — update text fields live (skip valoare to avoid NaN)
     if (el.tagName === 'INPUT') {
       el.addEventListener('input', function(e) {
         const idx = parseInt(e.target.dataset.idx);
@@ -429,8 +504,43 @@ function renderPreview(rows) {
       });
     }
   });
+}
 
-  section.style.display = 'block';
+function applyFilters(rows, tbody, thead) {
+  const filters = {};
+  thead.querySelectorAll('.col-filter').forEach(input => {
+    const col = input.dataset.col;
+    const val = input.value.trim().toLowerCase();
+    if (val) filters[col] = val;
+  });
+
+  if (Object.keys(filters).length === 0) {
+    renderTableRows(rows, tbody);
+    bindEditableEvents(tbody);
+    return;
+  }
+
+  const visibleIndices = [];
+  rows.forEach((row, idx) => {
+    const f = row.fields || emptyFields();
+    let match = true;
+    for (const [col, query] of Object.entries(filters)) {
+      let cellVal = '';
+      if (col === 'fileName') {
+        cellVal = (row.fileName || '').toLowerCase();
+      } else {
+        cellVal = (f[col] != null ? String(f[col]) : '').toLowerCase();
+      }
+      if (cellVal.indexOf(query) < 0) {
+        match = false;
+        break;
+      }
+    }
+    if (match) visibleIndices.push(idx);
+  });
+
+  renderTableRows(rows, tbody, visibleIndices);
+  bindEditableEvents(tbody);
 }
 
 function escHtml(str) {
@@ -486,9 +596,9 @@ function exportXlsx(rows) {
 
       var ws = XLSX.utils.aoa_to_sheet([headers].concat(data));
       ws['!cols'] = [
-        { wch: 4 }, { wch: 35 }, { wch: 24 }, { wch: 12 }, { wch: 14 },
+        { wch: 4 }, { wch: 35 }, { wch: 24 }, { wch: 12 }, { wch: 18 },
         { wch: 30 }, { wch: 8 }, { wch: 8 }, { wch: 14 },
-        { wch: 22 }, { wch: 22 }, { wch: 14 }, { wch: 20 }, { wch: 8 }
+        { wch: 22 }, { wch: 22 }, { wch: 14 }, { wch: 14 }, { wch: 20 }, { wch: 8 }
       ];
 
       var wb = XLSX.utils.book_new();
@@ -504,6 +614,58 @@ function exportXlsx(rows) {
   }, 50);
 }
 
+// ─── EXPORT ZIP (PDFs renamed by MRN) ───────────────────────────────────────
+async function exportZip(rows) {
+  if (!rows.length) return;
+  if (typeof JSZip === 'undefined') {
+    alert('JSZip library not loaded. Cannot create ZIP.');
+    return;
+  }
+
+  var btn = document.getElementById('btn-zip');
+  var origLabel = btn ? btn.textContent : '';
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ Se creează ZIP...'; }
+
+  try {
+    var zip = new JSZip();
+    var usedNames = {};
+
+    for (var i = 0; i < rows.length; i++) {
+      var row = rows[i];
+      var mrn = (row.fields && row.fields.dvi) ? row.fields.dvi : '';
+      var baseName = mrn || ('Unknown_MRN_' + (i + 1));
+
+      // Handle duplicate names
+      if (usedNames[baseName]) {
+        usedNames[baseName]++;
+        baseName = baseName + '_' + usedNames[baseName];
+      } else {
+        usedNames[baseName] = 1;
+      }
+
+      var fileName = baseName + '.pdf';
+
+      if (row.file) {
+        var arrayBuf = await row.file.arrayBuffer();
+        zip.file(fileName, arrayBuf);
+      }
+    }
+
+    var content = await zip.generateAsync({ type: 'blob' });
+    var link = document.createElement('a');
+    link.href = URL.createObjectURL(content);
+    link.download = 'DVI_PDFs_Renamed.zip';
+    link.click();
+    URL.revokeObjectURL(link.href);
+    console.log('[app.js] ZIP exported successfully');
+  } catch (err) {
+    console.error('[app.js] ZIP export error:', err);
+    alert('Eroare la export ZIP: ' + err.message);
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = origLabel; }
+  }
+}
+
 // ─── CLEAR ──────────────────────────────────────────────────────────────────
 function clearAll() {
   fileRows = [];
@@ -515,11 +677,13 @@ function clearAll() {
   document.getElementById('progress-fill').style.width = '0%';
   document.getElementById('progress-text').textContent = '';
   document.getElementById('btn-export').disabled = true;
+  var zipBtnClear = document.getElementById('btn-zip');
+  if (zipBtnClear) zipBtnClear.disabled = true;
 }
 
 // ─── EXPORTS FOR TESTING ────────────────────────────────────────────────────
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = { normalizeText, parseFields, emptyFields, patterns, ro,
     extractAWB, extractExportator, extractTaraExp, extractAwbLunaAn,
-    extractFactura, extractLocatie, COLUMNS };
+    extractFactura, extractLocatie, extractRegimUnificat, COLUMNS };
 }

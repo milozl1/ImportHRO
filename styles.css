@@ -297,6 +297,34 @@ header p {
   width: 180px;
 }
 
+/* Column filter inputs */
+.filter-row th {
+  padding: 4px 6px !important;
+  background: #f1f5f9 !important;
+}
+
+.col-filter {
+  width: 100%;
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-size: 0.78rem;
+  background: #fff;
+  color: var(--text);
+  outline: none;
+  transition: border-color 0.2s;
+}
+
+.col-filter:focus {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.15);
+}
+
+.col-filter::placeholder {
+  color: var(--text-muted);
+  opacity: 0.6;
+}
+
 /* ===== WARNINGS ===== */
 .warnings-section {
   margin-top: 16px;
