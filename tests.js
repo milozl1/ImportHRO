@@ -446,6 +446,9 @@ assertEqual(extractAWB(textN730Only), 'CMR-SHIPMENT-99', 'extractAWB standalone 
 // Regression: pdf.js merges columns so AWB line may have "Antrepozit - [12 11]" appended
 const textAWBNoise = `SEGMENT TRANSPORT Nr. 1\nDocumentul de transport - [12 05]\n1. N740 / 6646529444 Antrepozit - [12 11]\n`;
 assertEqual(extractAWB(textAWBNoise), '6646529444', 'extractAWB strips trailing Antrepozit label');
+// Regression: "Tipul" appended after AWB value
+const textAWBTipul = `SEGMENT TRANSPORT Nr. 1\nDocumentul de transport - [12 05]\n2. N705 / NGB25SE14687 Tipul\n`;
+assertEqual(extractAWB(textAWBTipul), 'NGB25SE14687', 'extractAWB strips trailing Tipul');
 
 console.log('▸ extractExportator');
 assertEqual(extractExportator(PDF1_TEXT), 'PRECI-DIP SA', 'extractExportator PDF1');

@@ -292,10 +292,10 @@ function extractAWB(text) {
 function cleanAWB(raw) {
   // Trim and remove trailing noise (slashes, excess spaces)
   let v = raw.replace(/\s*\/\s*$/, '').replace(/\s{2,}/g, ' ').trim();
-  // pdf.js merges adjacent PDF columns, so AWB values may be followed by a
-  // section label fragment like "Antrepozit -" (Title-case word then " -").
-  // Strip such trailing label fragments.
-  v = v.replace(/(?:\s+[A-Z][a-z]\w*)+\s*-\s*$/, '').trim();
+  // pdf.js merges adjacent PDF columns, so AWB values may be followed by
+  // section label fragments like "Antrepozit -", "Tipul", "Identificatorul".
+  // Strip trailing Title-case words that are common field labels.
+  v = v.replace(/(?:\s+[A-Z][a-z]\w*)+\s*-?\s*$/, '').trim();
   return v;
 }
 
