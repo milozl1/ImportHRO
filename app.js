@@ -28,6 +28,7 @@ const patterns = {
   importatorSection: ro('Importatorul\\s*-\\s*\\[13\\s*04\\]'),
   taraExpediere: ro('Țara\\s+de\\s+expedi(?:ere|ție)\\s*-?\\s*(?:\\[16\\s*06\\])?\\s+([A-Z]{2})'),
   regimUnificat: /Regim\s+unificat\s+(\d{4})/i,
+  preferinte: ro('Preferin[țt]e\\s*-\\s*\\[14\\s*11\\]\\s+(\\d+)'),
 };
 
 const MONTHS_RO = [
@@ -194,7 +195,7 @@ function emptyFields() {
   return {
     dvi: '', dataMRN: '', awb: '', exportator: '', taraExp: '',
     moneda: '', valoare: '', awbLunaAn: '', nrFactura: '',
-    codTaric: '', regimUnificat: '', locatie: '', gratis: 'NU'
+    codTaric: '', regimUnificat: '', locatie: '', preferinte: '', gratis: 'NU'
   };
 }
 
@@ -257,7 +258,12 @@ function parseFields(rawText) {
   f.locatie = extractLocatie(text);
   if (!f.locatie) warnings.push('Locație missing');
 
-  // 12) Gratis
+  // 12) Preferințe [14 11]
+  const prefMatch = text.match(patterns.preferinte);
+  if (prefMatch) f.preferinte = prefMatch[1].trim();
+  else warnings.push('Preferințe missing');
+
+  // 13) Gratis
   f.gratis = 'NU';
 
   return { fields: f, warnings };
@@ -418,6 +424,7 @@ const COLUMNS = [
   { key: 'codTaric',   label: 'Cod TARIC' },
   { key: 'regimUnificat', label: 'Regim unificat' },
   { key: 'locatie',    label: 'Locație' },
+  { key: 'preferinte', label: 'Preferințe' },
   { key: 'gratis',     label: 'Gratis', type: 'select', options: ['NU', 'DA'] },
 ];
 
@@ -598,7 +605,8 @@ function exportXlsx(rows) {
       ws['!cols'] = [
         { wch: 4 }, { wch: 35 }, { wch: 24 }, { wch: 12 }, { wch: 18 },
         { wch: 30 }, { wch: 8 }, { wch: 8 }, { wch: 14 },
-        { wch: 22 }, { wch: 22 }, { wch: 14 }, { wch: 14 }, { wch: 20 }, { wch: 8 }
+        { wch: 22 }, { wch: 22 }, { wch: 14 }, { wch: 14 }, { wch: 20 },
+        { wch: 12 }, { wch: 8 }
       ];
 
       var wb = XLSX.utils.book_new();
@@ -685,5 +693,6 @@ function clearAll() {
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = { normalizeText, parseFields, emptyFields, patterns, ro,
     extractAWB, extractExportator, extractTaraExp, extractAwbLunaAn,
-    extractFactura, extractLocatie, extractRegimUnificat, COLUMNS };
+    extractFactura, extractLocatie, extractRegimUnificat, COLUMNS,
+    extractPreferinte: function(text) { var m = text.match(patterns.preferinte); return m ? m[1].trim() : ''; } };
 }
