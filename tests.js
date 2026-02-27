@@ -18,7 +18,8 @@ global.document = doc;
 const {
   normalizeText, parseFields, emptyFields, patterns, ro,
   extractAWB, extractExportator, extractTaraExp, extractAwbLunaAn,
-  extractFactura, extractLocatie, extractRegimUnificat, COLUMNS
+  extractFactura, extractLocatie, extractRegimUnificat, COLUMNS,
+  extractPreferinte
 } = require('./app.js');
 
 // ─── Test infrastructure ────────────────────────────────────────────────────
@@ -74,6 +75,7 @@ Cuantumul total facturat - [14 06] 8802.5
 Țara de expediere - [16 06] CH
 
 Cod TARIC unificat 8536693000
+Preferințe - [14 11] 300
 
 SEGMENT MARFURI
 Nr. art. 1
@@ -121,6 +123,7 @@ Cuantumul total facturat - [14 06] 32205.6
 Țara de expediere - [16 06] GB
 
 Cod TARIC unificat 3810100000
+Preferințe - [14 11] 300
 
 SEGMENT MARFURI
 Nr. art. 1
@@ -150,6 +153,7 @@ Cuantumul total facturat - [14 06] 1234.56
 Ţara de expediere - [16 06] DE
 
 Cod TARIC unificat 8471300000
+Preferințe - [14 11] 100
 
 SEGMENT MARFURI
 Nr. art. 1
@@ -179,6 +183,7 @@ Cuantumul total facturat - [14 06] 55000.00
 Țara de expediere - [16 06] HU
 
 Cod TARIC unificat 8708950000
+Preferințe - [14 11] 200
 
 SEGMENT MARFURI
 Nr. art. 1
@@ -207,6 +212,7 @@ Cuantumul total facturat - [14 06] 12500.00
 Țara de expediere - [16 06] DE
 
 Cod TARIC unificat 8708299000
+Preferințe - [14 11] 100
 
 SEGMENT MARFURI
 Nr. art. 1
@@ -235,6 +241,7 @@ Cuantumul total facturat - [14 06] 2834.91
 Țara de expediere - [16 06] HK
 
 Cod TARIC unificat 8517140000
+Preferințe - [14 11] 100
 Regim unificat 4000`;
 
 // PDF7: Multi-invoice N380 with semicolon-separated values (user screenshot style)
@@ -258,6 +265,7 @@ Cuantumul total facturat - [14 06] 5500.00
 Țara de expediere - [16 06] CN
 
 Cod TARIC unificat 3926909790
+Preferințe - [14 11] 200
 Regim unificat 4000`;
 
 console.log('═══════════════════════════════════════════════');
@@ -277,8 +285,10 @@ const ef = emptyFields();
 assertEqual(ef.gratis, 'NU', 'gratis default is NU');
 assertEqual(ef.dvi, '', 'dvi default is empty');
 assertEqual(ef.codTaric, '', 'codTaric default is empty');
-assert(Object.keys(ef).length === 13, 'emptyFields has 13 keys, got ' + Object.keys(ef).length);
+assertEqual(ef.preferinte, '', 'preferinte default is empty');
+assert(Object.keys(ef).length === 14, 'emptyFields has 14 keys, got ' + Object.keys(ef).length);
 assert(ef.hasOwnProperty('regimUnificat'), 'emptyFields has regimUnificat');
+assert(ef.hasOwnProperty('preferinte'), 'emptyFields has preferinte');
 
 // ─── TEST GROUP: PDF1 parsing ───────────────────────────────────────────────
 console.log('▸ PDF1 – DHL / PRECI-DIP');
@@ -297,6 +307,7 @@ assertEqual(f1.nrFactura, '90022227', 'PDF1 Nr. Factură');
 assertEqual(f1.codTaric, '8536693000', 'PDF1 Cod TARIC');
 assertEqual(f1.regimUnificat, '4000', 'PDF1 Regim unificat');
 assertEqual(f1.locatie, 'GHIRODA', 'PDF1 Locație');
+assertEqual(f1.preferinte, '300', 'PDF1 Preferințe');
 assertEqual(f1.gratis, 'NU', 'PDF1 Gratis');
 
 // ─── TEST GROUP: PDF2 parsing ───────────────────────────────────────────────
@@ -316,6 +327,7 @@ assertEqual(f2.nrFactura, 'CI020226969A', 'PDF2 Nr. Factură (N380 priority)');
 assertEqual(f2.codTaric, '3810100000', 'PDF2 Cod TARIC');
 assertEqual(f2.regimUnificat, '4000', 'PDF2 Regim unificat');
 assertEqual(f2.locatie, 'GHIRODA', 'PDF2 Locație');
+assertEqual(f2.preferinte, '300', 'PDF2 Preferințe');
 assertEqual(f2.gratis, 'NU', 'PDF2 Gratis');
 
 // ─── TEST GROUP: Cedilla variants (ş/ţ) ────────────────────────────────────
@@ -335,6 +347,7 @@ assertEqual(f3.regimUnificat, '4071', 'PDF3 Regim unificat (cedilla text)');
 assert(f3.locatie.length > 0, 'PDF3 Locație extracted (cedilla Oraşul): "' + f3.locatie + '"');
 assertEqual(f3.dataMRN, '25/03/2026', 'PDF3 Data MRN');
 assertEqual(f3.awbLunaAn, 'AWB - Martie 2026', 'PDF3 AWB Luna An');
+assertEqual(f3.preferinte, '100', 'PDF3 Preferințe');
 
 // ─── TEST GROUP: ro() helper ────────────────────────────────────────────────
 console.log('▸ ro() helper');
@@ -372,6 +385,7 @@ assertEqual(f4.nrFactura, 'IKD-HELLA-ROM-S014', 'PDF4 Nr. Factură');
 assertEqual(f4.codTaric, '8708950000', 'PDF4 Cod TARIC');
 assertEqual(f4.regimUnificat, '4000', 'PDF4 Regim unificat');
 assertEqual(f4.locatie, 'GHIRODA', 'PDF4 Locație');
+assertEqual(f4.preferinte, '200', 'PDF4 Preferințe');
 assertEqual(f4.gratis, 'NU', 'PDF4 Gratis');
 
 // ─── TEST GROUP: PDF5 – N787 transport (picking list) ────────────────────────
@@ -390,6 +404,7 @@ assertEqual(f5.nrFactura, 'FACT-2026-100', 'PDF5 Nr. Factură');
 assertEqual(f5.codTaric, '8708299000', 'PDF5 Cod TARIC');
 assertEqual(f5.regimUnificat, '4071', 'PDF5 Regim unificat 4071');
 assertEqual(f5.locatie, 'GHIRODA', 'PDF5 Locație');
+assertEqual(f5.preferinte, '100', 'PDF5 Preferințe');
 assertEqual(f5.gratis, 'NU', 'PDF5 Gratis');
 
 // ─── TEST GROUP: PDF6 – Multi-invoice comma-separated ────────────────────────
@@ -408,6 +423,7 @@ assertEqual(f6.nrFactura, 'NL26020303, -304', 'PDF6 Nr. Factură (comma-separate
 assertEqual(f6.codTaric, '8517140000', 'PDF6 Cod TARIC');
 assertEqual(f6.regimUnificat, '4000', 'PDF6 Regim unificat');
 assertEqual(f6.locatie, 'GHIRODA', 'PDF6 Locație');
+assertEqual(f6.preferinte, '100', 'PDF6 Preferințe');
 assertEqual(f6.gratis, 'NU', 'PDF6 Gratis');
 
 // ─── TEST GROUP: PDF7 – Multi-invoice semicolon-separated ────────────────────
@@ -426,6 +442,7 @@ assertEqual(f7.nrFactura, '20199698; 20200760', 'PDF7 Nr. Factură (semicolon-se
 assertEqual(f7.codTaric, '3926909790', 'PDF7 Cod TARIC');
 assertEqual(f7.regimUnificat, '4000', 'PDF7 Regim unificat');
 assertEqual(f7.locatie, 'TIMISOARA', 'PDF7 Locație');
+assertEqual(f7.preferinte, '200', 'PDF7 Preferințe');
 assertEqual(f7.gratis, 'NU', 'PDF7 Gratis');
 
 // ─── TEST GROUP: Individual extractors ──────────────────────────────────────
@@ -509,7 +526,7 @@ assert(r1.warnings.length === 0, 'PDF1 has no warnings, got: ' + JSON.stringify(
 assert(r2.warnings.length === 0, 'PDF2 has no warnings, got: ' + JSON.stringify(r2.warnings));
 // Empty text should warn about all fields
 const emptyWarnings = parseFields('').warnings;
-assert(emptyWarnings.length >= 9, 'Empty text produces ≥9 warnings, got ' + emptyWarnings.length);
+assert(emptyWarnings.length >= 10, 'Empty text produces ≥10 warnings, got ' + emptyWarnings.length);
 assert(emptyWarnings.some(w => /MRN/i.test(w)), 'Empty text warns about MRN');
 assert(emptyWarnings.some(w => /AWB/i.test(w)), 'Empty text warns about AWB');
 assert(emptyWarnings.some(w => /Exportator/i.test(w)), 'Empty text warns about Exportator');
@@ -562,13 +579,14 @@ assertEqual(rDec.fields.awbLunaAn, 'AWB - Decembrie 2025', 'December extraction'
 
 // ─── TEST GROUP: COLUMNS config ─────────────────────────────────────────────
 console.log('▸ COLUMNS config');
-assert(COLUMNS.length === 13, 'COLUMNS has 13 entries, got ' + COLUMNS.length);
+assert(COLUMNS.length === 14, 'COLUMNS has 14 entries, got ' + COLUMNS.length);
 assertEqual(COLUMNS[COLUMNS.length - 1].key, 'gratis', 'Last column is gratis');
 assertEqual(COLUMNS[COLUMNS.length - 1].type, 'select', 'Gratis column is select type');
 assert(COLUMNS.find(c => c.key === 'codTaric'), 'COLUMNS contains codTaric');
 assert(COLUMNS.find(c => c.key === 'dataMRN'), 'COLUMNS contains dataMRN');
 assert(COLUMNS.find(c => c.key === 'locatie'), 'COLUMNS contains locatie');
 assert(COLUMNS.find(c => c.key === 'regimUnificat'), 'COLUMNS contains regimUnificat');
+assert(COLUMNS.find(c => c.key === 'preferinte'), 'COLUMNS contains preferinte');
 // Verify column order matches emptyFields keys
 const colKeys = COLUMNS.map(c => c.key);
 assert(colKeys.indexOf('dvi') < colKeys.indexOf('dataMRN'), 'dvi before dataMRN');

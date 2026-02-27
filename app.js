@@ -28,7 +28,7 @@ const patterns = {
   importatorSection: ro('Importatorul\\s*-\\s*\\[13\\s*04\\]'),
   taraExpediere: ro('Țara\\s+de\\s+expedi(?:ere|ție)\\s*-?\\s*(?:\\[16\\s*06\\])?\\s+([A-Z]{2})'),
   regimUnificat: /Regim\s+unificat\s+(\d{4})/i,
-  preferinte: ro('Preferin[țt]e\\s*-\\s*\\[14\\s*11\\]\\s+(\\d+)'),
+  preferinte: ro('Preferințe\\s*-\\s*\\[14\\s*11\\]\\s+(\\d+)'),
 };
 
 const MONTHS_RO = [
@@ -163,6 +163,7 @@ async function extractPdfText(file) {
 
         const lines = {};
         items.forEach(it => {
+          if (!it.transform) return;
           const y = Math.round(it.transform[5] / 2) * 2;
           const x = it.transform[4];
           if (!lines[y]) lines[y] = [];
