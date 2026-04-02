@@ -114,16 +114,41 @@ async function drainFileQueue() {
 }
 
 // ─── INIT ───────────────────────────────────────────────────────────────────
-const WORKER_URL = "lib/pdf.worker.min.js";
-const PDF_LOAD_TIMEOUT_MS = 15000;
+const APP_VERSION = "1.3.0";
 
 document.addEventListener("DOMContentLoaded", () => {
+  console.log("[app.js] v" + APP_VERSION + " loaded");
+
+  // ── Library availability check ───────────────────────────────────────
+  var missing = [];
+  if (typeof pdfjsLib === "undefined") missing.push("pdf.js");
+  if (typeof XLSX === "undefined") missing.push("SheetJS/xlsx");
+  if (typeof JSZip === "undefined") missing.push("JSZip");
+
+  if (missing.length) {
+    console.error("[app.js] Missing libraries:", missing.join(", "));
+    var warn = document.getElementById("warnings-container");
+    if (warn) {
+      warn.innerHTML =
+        '<p style="color:var(--error);font-weight:700;">⛔ Librăriile nu s-au încărcat: ' +
+        missing.join(", ") +
+        ". Încearcă Ctrl+Shift+R (hard refresh) sau contactează administratorul de rețea.</p>";
+    }
+  }
+
   if (typeof pdfjsLib !== "undefined") {
-    pdfjsLib.GlobalWorkerOptions.workerSrc = WORKER_URL;
-    console.log("[app.js] Initialized. pdfjsLib version:", pdfjsLib.version);
+    // Disable Worker entirely — customs declarations are 1-5 pages so
+    // main-thread parsing is <100 ms and avoids ALL corporate proxy /
+    // Tracking Prevention / CSP issues with Web Workers.
+    pdfjsLib.GlobalWorkerOptions.workerSrc = "";
+    console.log("[app.js] pdfjsLib version:", pdfjsLib.version, "(no-worker mode)");
   }
   setupDropZone();
   setupButtons();
+
+  // Show version in page
+  var header = document.querySelector("header p");
+  if (header) header.textContent += " — v" + APP_VERSION;
 });
 
 // ─── DROP ZONE & FILE INPUT ─────────────────────────────────────────────────
@@ -290,48 +315,11 @@ async function extractPdfText(file, onPageProcessed) {
   let pdf = null;
 
   try {
-    // ── Load PDF with timeout to catch worker hangs ──────────────────────
     var loadT0 = performance.now();
-    var loadingTask = pdfjsLib.getDocument({ data: arrayBuf });
-
-    // Promise.race guarantees we never hang even if the Worker is broken.
-    var timeoutPromise = new Promise(function (_, reject) {
-      setTimeout(function () {
-        reject(new Error("TIMEOUT"));
-      }, PDF_LOAD_TIMEOUT_MS);
-    });
-
-    try {
-      pdf = await Promise.race([loadingTask.promise, timeoutPromise]);
-    } catch (loadErr) {
-      // Kill the stuck loading task regardless.
-      loadingTask.destroy().catch(function () {});
-
-      if (loadErr.message === "TIMEOUT") {
-        console.warn(
-          "[app.js]",
-          file.name,
-          "— PDF load timed out after",
-          PDF_LOAD_TIMEOUT_MS,
-          "ms. Retrying without worker…",
-        );
-        // Re-read buffer in case the original was transferred to the dead worker.
-        arrayBuf = await file.arrayBuffer();
-        pdf = await pdfjsLib.getDocument({
-          data: arrayBuf,
-          disableWorker: true,
-        }).promise;
-        console.warn(
-          "[app.js]",
-          file.name,
-          "— fallback (no worker) loaded in",
-          Math.round(performance.now() - loadT0),
-          "ms",
-        );
-      } else {
-        throw loadErr;
-      }
-    }
+    pdf = await pdfjsLib.getDocument({
+      data: arrayBuf,
+      disableWorker: true,
+    }).promise;
 
     console.log(
       "[app.js]",
@@ -1131,7 +1119,6 @@ if (typeof module !== "undefined" && module.exports) {
     escHtml,
     escAttr,
     buildPageText,
-    WORKER_URL,
-    PDF_LOAD_TIMEOUT_MS,
+    APP_VERSION,
   };
 }

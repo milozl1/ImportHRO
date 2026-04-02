@@ -22,7 +22,7 @@ const {
   XLSX_EXPORT_COLUMNS, buildXlsxExportData,
   extractPreferinte,
   isPdfFile, fileFingerprint, escHtml, escAttr, buildPageText,
-  WORKER_URL, PDF_LOAD_TIMEOUT_MS
+  APP_VERSION
 } = require('./app.js');
 
 // ─── Test infrastructure ────────────────────────────────────────────────────
@@ -772,9 +772,8 @@ var mockTCWhitespace = { items: [{ str: '   ', transform: [1, 0, 0, 1, 10, 100] 
 assertEqual(buildPageText(mockTCWhitespace), 'Real', 'buildPageText filters whitespace-only items');
 
 console.log('▸ Config constants');
-assertEqual(WORKER_URL, 'lib/pdf.worker.min.js', 'Worker URL is local');
-assert(typeof PDF_LOAD_TIMEOUT_MS === 'number' && PDF_LOAD_TIMEOUT_MS > 0, 'PDF_LOAD_TIMEOUT_MS is positive number');
-assert(PDF_LOAD_TIMEOUT_MS >= 10000 && PDF_LOAD_TIMEOUT_MS <= 60000, 'PDF_LOAD_TIMEOUT_MS in reasonable range (10-60s)');
+assert(typeof APP_VERSION === 'string' && APP_VERSION.length > 0, 'APP_VERSION is non-empty string');
+assert(/^\d+\.\d+\.\d+$/.test(APP_VERSION), 'APP_VERSION is semver format');
 
 console.log('▸ COLUMNS/XLSX alignment');
 // COLUMNS and XLSX_EXPORT_COLUMNS should share the same keys (except fileName and awbLunaAn)
