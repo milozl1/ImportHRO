@@ -140,8 +140,18 @@ document.addEventListener("DOMContentLoaded", () => {
     // Disable Worker entirely — customs declarations are 1-5 pages so
     // main-thread parsing is <100 ms and avoids ALL corporate proxy /
     // Tracking Prevention / CSP issues with Web Workers.
-    pdfjsLib.GlobalWorkerOptions.workerSrc = "";
-    console.log("[app.js] pdfjsLib version:", pdfjsLib.version, "(no-worker mode)");
+    // IMPORTANT: pdf.js v3 throws "No GlobalWorkerOptions.workerSrc specified"
+    // if workerSrc is empty/falsy, even when disableWorker:true is passed.
+    // Create a no-op worker blob URL to satisfy the check while keeping
+    // everything on the main thread via disableWorker:true in getDocument().
+    try {
+      var noopWorkerBlob = new Blob(["// no-op worker"], { type: "application/javascript" });
+      pdfjsLib.GlobalWorkerOptions.workerSrc = URL.createObjectURL(noopWorkerBlob);
+    } catch (_) {
+      // Blob/URL unavailable (very old browser) — set a dummy non-empty string
+      pdfjsLib.GlobalWorkerOptions.workerSrc = "noop-worker.js";
+    }
+    console.log("[app.js] pdfjsLib version:", pdfjsLib.version, "(no-worker mode, workerSrc:", pdfjsLib.GlobalWorkerOptions.workerSrc.substring(0, 50) + ")");
   }
   setupDropZone();
   setupButtons();
