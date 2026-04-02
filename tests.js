@@ -603,7 +603,7 @@ assertEqual(rDec.fields.awbLunaAn, 'AWB - Decembrie 2025', 'December extraction'
 
 // ─── TEST GROUP: COLUMNS config ─────────────────────────────────────────────
 console.log('▸ COLUMNS config');
-assert(COLUMNS.length === 14, 'COLUMNS has 14 entries, got ' + COLUMNS.length);
+assert(COLUMNS.length === 13, 'COLUMNS has 13 entries, got ' + COLUMNS.length);
 assertEqual(COLUMNS[COLUMNS.length - 1].key, 'gratis', 'Last column is gratis');
 assertEqual(COLUMNS[COLUMNS.length - 1].type, 'select', 'Gratis column is select type');
 assert(COLUMNS.find(c => c.key === 'codTaric'), 'COLUMNS contains codTaric');
@@ -614,7 +614,7 @@ assert(COLUMNS.find(c => c.key === 'preferinte'), 'COLUMNS contains preferinte')
 // Verify column order matches emptyFields keys
 const colKeys = COLUMNS.map(c => c.key);
 assert(colKeys.indexOf('dvi') < colKeys.indexOf('dataMRN'), 'dvi before dataMRN');
-assert(colKeys.indexOf('dataMRN') < colKeys.indexOf('awb'), 'dataMRN before awb');
+assert(colKeys.indexOf('awb') < colKeys.indexOf('dvi'), 'awb before dvi');
 assert(colKeys.indexOf('codTaric') < colKeys.indexOf('locatie'), 'codTaric before locatie');
 assert(colKeys.indexOf('locatie') < colKeys.indexOf('gratis'), 'locatie before gratis');
 // Every COLUMN key must exist in emptyFields

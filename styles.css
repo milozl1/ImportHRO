@@ -157,6 +157,15 @@ header p {
   background: var(--bg);
 }
 
+.btn-danger {
+  background: var(--error);
+  color: #fff;
+}
+
+.btn-danger:hover:not(:disabled) {
+  background: #b91c1c;
+}
+
 /* ===== PROGRESS ===== */
 .progress-wrap {
   display: none;

@@ -58,17 +58,101 @@ const MONTHS_RO = [
 
 // ─── STATE ──────────────────────────────────────────────────────────────────
 let fileRows = [];
+let processingInProgress = false;
+let abortProcessing = false;
+let queuedFiles = [];
+let seenFileFingerprints = new Set();
+
+function isPdfFile(file) {
+  return (
+    file &&
+    (file.type === "application/pdf" ||
+      (file.name || "").toLowerCase().endsWith(".pdf"))
+  );
+}
+
+function fileFingerprint(file) {
+  return [file.name || "", file.size || 0, file.lastModified || 0].join("::");
+}
+
+function enqueueFiles(files) {
+  const pdfFiles = (files || []).filter(isPdfFile);
+  if (!pdfFiles.length) return;
+
+  const freshFiles = pdfFiles.filter((file) => {
+    const fp = fileFingerprint(file);
+    if (seenFileFingerprints.has(fp)) return false;
+    seenFileFingerprints.add(fp);
+    return true;
+  });
+
+  if (!freshFiles.length) {
+    console.log("[app.js] enqueueFiles: duplicate batch skipped");
+    return;
+  }
+
+  queuedFiles = queuedFiles.concat(freshFiles);
+  if (!processingInProgress) {
+    drainFileQueue();
+  }
+}
+
+async function drainFileQueue() {
+  if (processingInProgress) return;
+  processingInProgress = true;
+  abortProcessing = false;
+
+  try {
+    while (queuedFiles.length && !abortProcessing) {
+      const batch = queuedFiles.splice(0, queuedFiles.length);
+      await readFiles(batch);
+    }
+  } finally {
+    processingInProgress = false;
+    abortProcessing = false;
+  }
+}
 
 // ─── INIT ───────────────────────────────────────────────────────────────────
+const WORKER_CDN_URL =
+  "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+const PDF_LOAD_TIMEOUT_MS = 15000;
+
 document.addEventListener("DOMContentLoaded", () => {
   if (typeof pdfjsLib !== "undefined") {
-    pdfjsLib.GlobalWorkerOptions.workerSrc =
-      "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+    // Set CDN URL immediately so it's always available as fallback.
+    pdfjsLib.GlobalWorkerOptions.workerSrc = WORKER_CDN_URL;
+    // Then try to upgrade to a same-origin blob URL in the background.
+    // This bypasses cross-origin Worker restrictions and Tracking Prevention
+    // that can cause getDocument() to hang indefinitely on some corporate networks.
+    preloadWorkerAsBlob();
     console.log("[app.js] Initialized. pdfjsLib version:", pdfjsLib.version);
   }
   setupDropZone();
   setupButtons();
 });
+
+async function preloadWorkerAsBlob() {
+  try {
+    var t0 = performance.now();
+    var resp = await fetch(WORKER_CDN_URL);
+    if (!resp.ok) throw new Error("HTTP " + resp.status);
+    var code = await resp.text();
+    var blob = new Blob([code], { type: "application/javascript" });
+    pdfjsLib.GlobalWorkerOptions.workerSrc = URL.createObjectURL(blob);
+    console.log(
+      "[app.js] Worker upgraded to same-origin blob URL in",
+      Math.round(performance.now() - t0),
+      "ms",
+    );
+  } catch (e) {
+    console.warn(
+      "[app.js] Worker blob pre-load failed:",
+      e.message,
+      "— using CDN URL directly (may be slow on restricted networks)",
+    );
+  }
+}
 
 // ─── DROP ZONE & FILE INPUT ─────────────────────────────────────────────────
 function setupDropZone() {
@@ -84,16 +168,13 @@ function setupDropZone() {
   zone.addEventListener("drop", (e) => {
     e.preventDefault();
     zone.classList.remove("dragover");
-    const files = [...e.dataTransfer.files].filter(
-      (f) =>
-        f.type === "application/pdf" || f.name.toLowerCase().endsWith(".pdf"),
-    );
-    if (files.length) readFiles(files);
+    const files = [...e.dataTransfer.files];
+    if (files.length) enqueueFiles(files);
   });
 
   input.addEventListener("change", () => {
     const files = [...input.files];
-    if (files.length) readFiles(files);
+    if (files.length) enqueueFiles(files);
     input.value = "";
   });
 }
@@ -101,10 +182,12 @@ function setupDropZone() {
 function setupButtons() {
   const btnExport = document.getElementById("btn-export");
   const btnClear = document.getElementById("btn-clear");
+  const btnClearAggressive = document.getElementById("btn-clear-aggressive");
   const btnZip = document.getElementById("btn-zip");
   if (btnExport)
     btnExport.addEventListener("click", () => exportXlsx(fileRows));
   if (btnClear) btnClear.addEventListener("click", clearAll);
+  if (btnClearAggressive) btnClearAggressive.addEventListener("click", aggressiveClear);
   if (btnZip) btnZip.addEventListener("click", () => exportZip(fileRows));
 }
 
@@ -138,20 +221,32 @@ async function readFiles(files) {
   progressWrap.classList.add("visible");
 
   const total = newItems.length;
+  const batchT0 = performance.now();
   for (let i = 0; i < total; i++) {
+    if (abortProcessing) break;
     const item = newItems[i];
     const safeId = "fli-" + item.fileName.replace(/[^a-zA-Z0-9]/g, "_");
+    let text = "";
     setFileStatus(safeId, "processing");
-    progressText.textContent = `Processing file ${i + 1}/${total} — ${item.fileName}`;
+    var elapsed = ((performance.now() - batchT0) / 1000).toFixed(1);
+    progressText.textContent = `Processing file ${i + 1}/${total} — ${item.fileName} (${elapsed}s)`;
     progressFill.style.width = `${(i / total) * 100}%`;
 
     try {
-      const text = await extractPdfText(item.file);
+      var itemT0 = performance.now();
+      text = await extractPdfText(item.file, function (pageNo, totalPages) {
+        var elapsed = ((performance.now() - batchT0) / 1000).toFixed(1);
+        progressText.textContent =
+          `Processing file ${i + 1}/${total} — ${item.fileName}` +
+          ` (page ${pageNo}/${totalPages}) — ${elapsed}s`;
+      });
       console.log(
         "[app.js] Extracted text length:",
         text.length,
-        "first 400 chars:",
-        text.substring(0, 400),
+        "in",
+        Math.round(performance.now() - itemT0),
+        "ms —",
+        item.fileName,
       );
       const result = parseFields(text);
       item.fields = result.fields;
@@ -162,13 +257,17 @@ async function readFiles(files) {
       item.status = "error";
       item.warnings = ["Eroare la procesare: " + err.message];
       item.fields = emptyFields();
+    } finally {
+      // Release large transient string after parsing to help GC on big documents.
+      text = "";
     }
     setFileStatus(safeId, item.status);
     fileRows.push(item);
     progressFill.style.width = `${((i + 1) / total) * 100}%`;
   }
 
-  progressText.textContent = `Done — ${total} file(s) processed.`;
+  var totalSec = ((performance.now() - batchT0) / 1000).toFixed(1);
+  progressText.textContent = `Done — ${total} file(s) processed in ${totalSec}s.`;
   renderPreview(fileRows);
   renderWarnings(fileRows);
   document.getElementById("btn-export").disabled = false;
@@ -187,50 +286,151 @@ function setFileStatus(liId, status) {
 }
 
 // ─── EXTRACT PDF TEXT ───────────────────────────────────────────────────────
-async function extractPdfText(file) {
-  const arrayBuf = await file.arrayBuffer();
-  const pdf = await pdfjsLib.getDocument({ data: arrayBuf }).promise;
-  const numPages = pdf.numPages;
+function buildPageText(tc) {
+  const items = tc.items.filter((it) => it.str && it.str.trim().length > 0);
+  if (items.length === 0) return "";
 
-  const pagePromises = [];
-  for (let p = 1; p <= numPages; p++) {
-    pagePromises.push(
-      pdf
-        .getPage(p)
-        .then((page) => page.getTextContent())
-        .then((tc) => {
-          const items = tc.items.filter(
-            (it) => it.str && it.str.trim().length > 0,
-          );
-          if (items.length === 0) return "";
+  const lines = {};
+  items.forEach((it) => {
+    if (!it.transform) return;
+    const y = Math.round(it.transform[5] / 2) * 2;
+    const x = it.transform[4];
+    if (!lines[y]) lines[y] = [];
+    lines[y].push({ x, str: it.str });
+  });
 
-          const lines = {};
-          items.forEach((it) => {
-            if (!it.transform) return;
-            const y = Math.round(it.transform[5] / 2) * 2;
-            const x = it.transform[4];
-            if (!lines[y]) lines[y] = [];
-            lines[y].push({ x, str: it.str });
-          });
+  const sortedYs = Object.keys(lines)
+    .map(Number)
+    .sort((a, b) => b - a);
+  return sortedYs
+    .map((y) => {
+      return lines[y]
+        .sort((a, b) => a.x - b.x)
+        .map((it) => it.str)
+        .join(" ");
+    })
+    .join("\n");
+}
 
-          const sortedYs = Object.keys(lines)
-            .map(Number)
-            .sort((a, b) => b - a);
-          return sortedYs
-            .map((y) => {
-              return lines[y]
-                .sort((a, b) => a.x - b.x)
-                .map((it) => it.str)
-                .join(" ");
-            })
-            .join("\n");
-        }),
+async function extractPdfText(file, onPageProcessed) {
+  var fileT0 = performance.now();
+  let arrayBuf = await file.arrayBuffer();
+  let pdf = null;
+
+  try {
+    // ── Load PDF with timeout to catch worker hangs ──────────────────────
+    var loadT0 = performance.now();
+    var loadingTask = pdfjsLib.getDocument({ data: arrayBuf });
+    var timedOut = false;
+
+    var loadTimer = setTimeout(function () {
+      timedOut = true;
+      loadingTask.destroy().catch(function () {});
+    }, PDF_LOAD_TIMEOUT_MS);
+
+    try {
+      pdf = await loadingTask.promise;
+    } catch (loadErr) {
+      if (timedOut) {
+        console.warn(
+          "[app.js]",
+          file.name,
+          "— PDF load timed out after",
+          PDF_LOAD_TIMEOUT_MS,
+          "ms. Worker may be blocked. Retrying without worker…",
+        );
+        // Re-read buffer in case the original was transferred to the dead worker.
+        arrayBuf = await file.arrayBuffer();
+        pdf = await pdfjsLib.getDocument({
+          data: arrayBuf,
+          disableWorker: true,
+        }).promise;
+        console.warn(
+          "[app.js]",
+          file.name,
+          "— fallback (no worker) loaded in",
+          Math.round(performance.now() - loadT0),
+          "ms",
+        );
+      } else {
+        throw loadErr;
+      }
+    } finally {
+      clearTimeout(loadTimer);
+    }
+
+    console.log(
+      "[app.js]",
+      file.name,
+      "— PDF opened in",
+      Math.round(performance.now() - loadT0),
+      "ms,",
+      pdf.numPages,
+      "pages",
     );
-  }
 
-  const pages = await Promise.all(pagePromises);
-  pdf.destroy();
-  return pages.join("\n\n");
+    // ── Extract pages in batches ─────────────────────────────────────────
+    const numPages = pdf.numPages;
+    const pages = new Array(numPages).fill("");
+    const batchSize = 4;
+
+    for (let start = 1; start <= numPages; start += batchSize) {
+      const end = Math.min(numPages, start + batchSize - 1);
+      const batchPromises = [];
+
+      for (let p = start; p <= end; p++) {
+        batchPromises.push(
+          pdf
+            .getPage(p)
+            .then((page) => page.getTextContent())
+            .then((tc) => {
+              pages[p - 1] = buildPageText(tc);
+            })
+            .catch((err) => {
+              console.warn("[app.js] Page extraction failed", file.name, "page", p, err);
+              pages[p - 1] = "";
+            })
+            .finally(() => {
+              if (typeof onPageProcessed === "function") {
+                onPageProcessed(p, numPages);
+              }
+            }),
+        );
+      }
+
+      await Promise.all(batchPromises);
+
+      // Yield to UI thread between page batches so the app feels responsive.
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+
+    var totalMs = Math.round(performance.now() - fileT0);
+    console.log(
+      "[app.js]",
+      file.name,
+      "— full extraction done in",
+      totalMs,
+      "ms (" + numPages + " pages)",
+    );
+
+    return pages.join("\n\n");
+  } finally {
+    // Drop input buffer reference promptly; it's one of the largest allocations.
+    arrayBuf = null;
+
+    if (pdf) {
+      try {
+        await pdf.cleanup();
+      } catch (_) {
+        // noop
+      }
+      try {
+        await pdf.destroy();
+      } catch (_) {
+        // noop
+      }
+    }
+  }
 }
 
 // ─── NORMALIZE ──────────────────────────────────────────────────────────────
@@ -516,19 +716,18 @@ function extractLocatie(text) {
 
 // ─── COLUMN DEFINITIONS ─────────────────────────────────────────────────────
 const COLUMNS = [
-  { key: "dvi", label: "DVI (MRN)" },
-  { key: "dataMRN", label: "Data MRN" },
   { key: "awb", label: "AWB" },
   { key: "exportator", label: "Exportator" },
   { key: "taraExp", label: "Țara Exp." },
-  { key: "moneda", label: "Moneda" },
-  { key: "valoare", label: "Valoare Marfă" },
-  { key: "awbLunaAn", label: "AWB - Luna An" },
   { key: "nrFactura", label: "Nr. Factură" },
+  { key: "valoare", label: "Valoare Marfă" },
+  { key: "moneda", label: "Moneda" },
+  { key: "dvi", label: "MRN" },
+  { key: "dataMRN", label: "Data MRN" },
   { key: "codTaric", label: "Cod TARIC" },
   { key: "regimUnificat", label: "Regim unificat" },
-  { key: "locatie", label: "Locație" },
   { key: "preferinte", label: "Preferințe" },
+  { key: "locatie", label: "Locație" },
   { key: "gratis", label: "Gratis", type: "select", options: ["NU", "DA"] },
 ];
 
@@ -733,6 +932,7 @@ function escAttr(str) {
   return (str || "")
     .replace(/&/g, "&amp;")
     .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;");
 }
@@ -856,6 +1056,8 @@ async function exportZip(rows) {
       if (row.file) {
         var arrayBuf = await row.file.arrayBuffer();
         zip.file(fileName, arrayBuf);
+        // Release loop-local reference quickly when processing many files.
+        arrayBuf = null;
       }
     }
 
@@ -879,7 +1081,17 @@ async function exportZip(rows) {
 
 // ─── CLEAR ──────────────────────────────────────────────────────────────────
 function clearAll() {
+  // Signal any in-progress processing to stop.
+  abortProcessing = true;
+  // Explicitly break references to large objects (File/Blob) before reset.
+  fileRows.forEach(function (row) {
+    row.file = null;
+    row.fields = null;
+    row.warnings = null;
+  });
   fileRows = [];
+  queuedFiles = [];
+  seenFileFingerprints = new Set();
   document.getElementById("file-list").innerHTML = "";
   document.getElementById("preview-tbody").innerHTML = "";
   document.getElementById("preview-section").style.display = "none";
@@ -890,6 +1102,31 @@ function clearAll() {
   document.getElementById("btn-export").disabled = true;
   var zipBtnClear = document.getElementById("btn-zip");
   if (zipBtnClear) zipBtnClear.disabled = true;
+}
+
+function aggressiveClear() {
+  var hasWork = fileRows.length > 0 || queuedFiles.length > 0 || processingInProgress;
+  var msg = hasWork
+    ? "Curățare agresivă: toate datele din sesiunea curentă vor fi șterse și pagina va fi reîncărcată. Continui?"
+    : "Pagina va fi reîncărcată pentru reset complet de memorie. Continui?";
+
+  if (!window.confirm(msg)) return;
+
+  clearAll();
+
+  // Some browsers expose manual GC in special modes; call it if available.
+  if (typeof window.gc === "function") {
+    try {
+      window.gc();
+    } catch (_) {
+      // noop
+    }
+  }
+
+  // Hard reset the tab context to release all runtime references quickly.
+  setTimeout(function () {
+    window.location.reload();
+  }, 80);
 }
 
 // ─── EXPORTS FOR TESTING ────────────────────────────────────────────────────
