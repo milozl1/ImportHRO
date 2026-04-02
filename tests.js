@@ -794,7 +794,7 @@ assertEqual(JSON.stringify(xlsxDataKeys), JSON.stringify(colDataKeys), 'COLUMNS 
 
 // ─── extractCUI ─────────────────────────────────────────────────────────────
 console.log('▸ extractCUI');
-assertEqual(EXPECTED_CUI, 'RO1629090', 'EXPECTED_CUI constant is RO1629090');
+assertEqual(EXPECTED_CUI, 'RO16297090', 'EXPECTED_CUI constant is RO16297090');
 
 // CUI in Declarantul section
 assertEqual(

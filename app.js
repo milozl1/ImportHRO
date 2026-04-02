@@ -43,7 +43,7 @@ const patterns = {
 };
 
 // ─── CUI FILTER ─────────────────────────────────────────────────────────────
-const EXPECTED_CUI = "RO1629090";
+const EXPECTED_CUI = "RO16297090";
 
 const MONTHS_RO = [
   "Ianuarie",
