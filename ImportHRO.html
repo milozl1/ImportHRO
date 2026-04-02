@@ -688,22 +688,30 @@ document.addEventListener("DOMContentLoaded", () => {
     // Customs declarations are 1-5 pages so main-thread is <100 ms.
     // This avoids ALL corporate proxy / Tracking Prevention / CSP issues.
     //
-    // How it works:
-    //  1. Override window.Worker so new Worker() throws → pdf.js catches
-    //     the error and falls back to _setupFakeWorker() (main-thread).
-    //  2. _setupFakeWorker loads workerSrc as a <script> tag (NOT Worker).
-    //     If window.pdfjsWorker is already set (inlined build), it skips
-    //     the script load entirely.
-    //  3. For index.html: workerSrc = "lib/pdf.worker.min.js" (loaded via <script>).
-    //     For ImportHRO.html: pdf.worker.min.js is inlined so pdfjsWorker exists.
+    // Strategy:
+    //  1. pdf.worker.min.js is loaded as a static <script> tag in HTML
+    //     (both index.html and ImportHRO.html), setting window.pdfjsWorker.
+    //  2. We inject WorkerMessageHandler into PDFWorker so _setupFakeWorker
+    //     returns it immediately — no dynamic loadScript() call at all.
+    //  3. Override window.Worker to force the fake-worker fallback path.
+    //  4. workerSrc is set non-empty to pass pdf.js v3 validation.
     if (typeof window !== "undefined") {
       window.Worker = function PdfJsWorkerDisabled() {
         throw new Error("Worker disabled — using main-thread parsing");
       };
     }
     pdfjsLib.GlobalWorkerOptions.workerSrc = "lib/pdf.worker.min.js";
-    console.log("[app.js] pdfjsLib version:", pdfjsLib.version,
-      "(fake-worker mode, pdfjsWorker pre-loaded:", typeof window !== "undefined" && !!window.pdfjsWorker, ")");
+
+    // Inject the pre-loaded WorkerMessageHandler so _setupFakeWorkerGlobal
+    // returns it directly without calling loadScript().
+    var workerModule = (typeof window !== "undefined" && window.pdfjsWorker) ||
+                       (typeof globalThis !== "undefined" && globalThis.pdfjsWorker);
+    if (workerModule && workerModule.WorkerMessageHandler) {
+      pdfjsLib.PDFWorker._mainThreadWorkerMessageHandler = workerModule.WorkerMessageHandler;
+      console.log("[app.js] pdfjsLib version:", pdfjsLib.version, "(main-thread mode, WorkerMessageHandler injected)");
+    } else {
+      console.warn("[app.js] pdfjsLib version:", pdfjsLib.version, "(fake-worker mode, pdfjsWorker NOT pre-loaded — will try loadScript)");
+    }
   }
   setupDropZone();
   setupButtons();
