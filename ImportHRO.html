@@ -628,7 +628,7 @@ async function drainFileQueue() {
 }
 
 // ─── INIT ───────────────────────────────────────────────────────────────────
-const APP_VERSION = "1.3.0";
+const APP_VERSION = "1.4.0";
 
 document.addEventListener("DOMContentLoaded", () => {
   console.log("[app.js] v" + APP_VERSION + " loaded");
@@ -765,6 +765,7 @@ async function readFiles(files) {
       item.status = result.warnings.length ? "warning" : "done";
     } catch (err) {
       console.error("[app.js] Error processing", item.fileName, err);
+      diagLog("ERROR: " + item.fileName + " — " + err.message);
       item.status = "error";
       item.warnings = ["Eroare la procesare: " + err.message];
       item.fields = emptyFields();
@@ -823,32 +824,88 @@ function buildPageText(tc) {
     .join("\n");
 }
 
+// Helper: read file as ArrayBuffer with FileReader fallback
+function readFileAsArrayBuffer(file) {
+  // Prefer modern API, fall back to FileReader for older browsers
+  if (typeof file.arrayBuffer === "function") {
+    return file.arrayBuffer();
+  }
+  return new Promise(function (resolve, reject) {
+    var reader = new FileReader();
+    reader.onload = function () { resolve(reader.result); };
+    reader.onerror = function () { reject(new Error("FileReader failed: " + (reader.error || "unknown"))); };
+    reader.readAsArrayBuffer(file);
+  });
+}
+
+// Helper: race a promise against a timeout
+function withTimeout(promise, ms, label) {
+  return new Promise(function (resolve, reject) {
+    var timer = setTimeout(function () {
+      reject(new Error("TIMEOUT after " + (ms / 1000) + "s — " + label));
+    }, ms);
+    promise.then(
+      function (v) { clearTimeout(timer); resolve(v); },
+      function (e) { clearTimeout(timer); reject(e); }
+    );
+  });
+}
+
+// Diagnostic log visible in UI (appended to warnings container)
+function diagLog(msg) {
+  console.log("[diag]", msg);
+  var el = document.getElementById("diag-log");
+  if (!el) {
+    var container = document.getElementById("warnings-container");
+    if (container) {
+      el = document.createElement("pre");
+      el.id = "diag-log";
+      el.style.cssText = "font-size:0.75rem;color:#666;max-height:200px;overflow:auto;white-space:pre-wrap;margin-top:8px;";
+      container.appendChild(el);
+    }
+  }
+  if (el) {
+    el.textContent += "[" + new Date().toLocaleTimeString() + "] " + msg + "\n";
+    el.scrollTop = el.scrollHeight;
+  }
+}
+
 async function extractPdfText(file, onPageProcessed) {
   var fileT0 = performance.now();
-  let arrayBuf = await file.arrayBuffer();
+  let arrayBuf = null;
   let pdf = null;
 
   try {
+    // ── Step 1: Read file into memory ──────────────────────────────────
+    diagLog("Step 1/3: Reading " + file.name + " (" + Math.round((file.size || 0) / 1024) + " KB)...");
+    arrayBuf = await withTimeout(readFileAsArrayBuffer(file), 15000, "readFileAsArrayBuffer");
+    diagLog("Step 1/3: OK — read " + arrayBuf.byteLength + " bytes in " + Math.round(performance.now() - fileT0) + " ms");
+
+    // ── Step 2: Open PDF with pdf.js ───────────────────────────────────
+    // IMPORTANT: pass Uint8Array (not raw ArrayBuffer) for max compatibility
+    // with disableWorker mode in all pdf.js versions
+    var pdfData = new Uint8Array(arrayBuf);
+    arrayBuf = null; // free original buffer immediately
+
+    diagLog("Step 2/3: Opening PDF with pdf.js (no-worker mode)...");
     var loadT0 = performance.now();
-    pdf = await pdfjsLib.getDocument({
-      data: arrayBuf,
+    var loadingTask = pdfjsLib.getDocument({
+      data: pdfData,
       disableWorker: true,
-    }).promise;
+    });
 
-    console.log(
-      "[app.js]",
-      file.name,
-      "— PDF opened in",
-      Math.round(performance.now() - loadT0),
-      "ms,",
-      pdf.numPages,
-      "pages",
-    );
+    pdf = await withTimeout(loadingTask.promise, 30000, "pdfjsLib.getDocument");
+    diagLog("Step 2/3: OK — " + pdf.numPages + " pages, opened in " + Math.round(performance.now() - loadT0) + " ms");
 
-    // ── Extract pages in batches ─────────────────────────────────────────
+    // Free pdfData after getDocument has consumed it
+    pdfData = null;
+
+    // ── Step 3: Extract text from pages ────────────────────────────────
     const numPages = pdf.numPages;
     const pages = new Array(numPages).fill("");
     const batchSize = 4;
+
+    diagLog("Step 3/3: Extracting text from " + numPages + " pages...");
 
     for (let start = 1; start <= numPages; start += batchSize) {
       const end = Math.min(numPages, start + batchSize - 1);
@@ -858,15 +915,15 @@ async function extractPdfText(file, onPageProcessed) {
         batchPromises.push(
           pdf
             .getPage(p)
-            .then((page) => page.getTextContent())
-            .then((tc) => {
+            .then(function (page) { return page.getTextContent(); })
+            .then(function (tc) {
               pages[p - 1] = buildPageText(tc);
             })
-            .catch((err) => {
+            .catch(function (err) {
               console.warn("[app.js] Page extraction failed", file.name, "page", p, err);
               pages[p - 1] = "";
             })
-            .finally(() => {
+            .finally(function () {
               if (typeof onPageProcessed === "function") {
                 onPageProcessed(p, numPages);
               }
@@ -874,24 +931,17 @@ async function extractPdfText(file, onPageProcessed) {
         );
       }
 
-      await Promise.all(batchPromises);
+      await withTimeout(Promise.all(batchPromises), 15000, "page batch " + start + "-" + end);
 
       // Yield to UI thread between page batches so the app feels responsive.
-      await new Promise((resolve) => setTimeout(resolve, 0));
+      await new Promise(function (resolve) { setTimeout(resolve, 0); });
     }
 
     var totalMs = Math.round(performance.now() - fileT0);
-    console.log(
-      "[app.js]",
-      file.name,
-      "— full extraction done in",
-      totalMs,
-      "ms (" + numPages + " pages)",
-    );
+    diagLog("Step 3/3: OK — all " + numPages + " pages extracted in " + totalMs + " ms total");
 
     return pages.join("\n\n");
   } finally {
-    // Drop input buffer reference promptly; it's one of the largest allocations.
     arrayBuf = null;
 
     if (pdf) {
