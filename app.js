@@ -1,6 +1,6 @@
 /* ==========================================================================
    app.js – Import DVI / MRN PDF extractor  (100 % client-side)
-   Dependencies: pdf.js (CDN), SheetJS/xlsx (CDN)
+   Dependencies: pdf.js, SheetJS/xlsx, JSZip (self-hosted in lib/)
    ========================================================================== */
 
 // ─── HELPER: Romanian char class (handle both Unicode variants) ─────────────
@@ -1126,5 +1126,12 @@ if (typeof module !== "undefined" && module.exports) {
       var m = text.match(patterns.preferinte);
       return m ? m[1].trim() : "";
     },
+    isPdfFile,
+    fileFingerprint,
+    escHtml,
+    escAttr,
+    buildPageText,
+    WORKER_URL,
+    PDF_LOAD_TIMEOUT_MS,
   };
 }

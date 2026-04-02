@@ -20,7 +20,9 @@ const {
   extractAWB, extractExportator, extractTaraExp, extractAwbLunaAn,
   extractFactura, extractCodTaric, extractLocatie, extractRegimUnificat, COLUMNS,
   XLSX_EXPORT_COLUMNS, buildXlsxExportData,
-  extractPreferinte
+  extractPreferinte,
+  isPdfFile, fileFingerprint, escHtml, escAttr, buildPageText,
+  WORKER_URL, PDF_LOAD_TIMEOUT_MS
 } = require('./app.js');
 
 // ─── Test infrastructure ────────────────────────────────────────────────────
@@ -701,6 +703,94 @@ assertEqual(f2.awbLunaAn, 'AWB - Februarie 2026', 'PDF2 AWB Luna An consistent w
 assertEqual(f1.gratis, 'NU', 'PDF1 gratis default');
 assertEqual(f2.gratis, 'NU', 'PDF2 gratis default');
 assertEqual(f3.gratis, 'NU', 'PDF3 gratis default');
+
+// ─── TEST GROUP: New infrastructure (isPdfFile, fingerprint, escaping, buildPageText, config) ──
+console.log('▸ isPdfFile');
+assert(isPdfFile({ type: 'application/pdf', name: 'a.pdf' }), 'PDF by MIME');
+assert(isPdfFile({ type: '', name: 'Report.PDF' }), 'PDF by extension (uppercase)');
+assert(isPdfFile({ type: '', name: 'test.pdf' }), 'PDF by .pdf extension');
+assert(!isPdfFile({ type: 'image/png', name: 'pic.png' }), 'PNG is not PDF');
+assert(!isPdfFile(null), 'null is not PDF');
+assert(!isPdfFile(undefined), 'undefined is not PDF');
+assert(!isPdfFile({ type: '', name: '' }), 'empty name/type is not PDF');
+
+console.log('▸ fileFingerprint');
+var fp1 = fileFingerprint({ name: 'test.pdf', size: 1234, lastModified: 9999 });
+assertEqual(fp1, 'test.pdf::1234::9999', 'fingerprint format');
+var fp2 = fileFingerprint({ name: 'test.pdf', size: 1234, lastModified: 9999 });
+assertEqual(fp1, fp2, 'same file same fingerprint');
+var fp3 = fileFingerprint({ name: 'other.pdf', size: 1234, lastModified: 9999 });
+assert(fp1 !== fp3, 'different name different fingerprint');
+var fp4 = fileFingerprint({ name: 'test.pdf', size: 5678, lastModified: 9999 });
+assert(fp1 !== fp4, 'different size different fingerprint');
+var fp5 = fileFingerprint({});
+assertEqual(fp5, '::0::0', 'missing props use defaults');
+
+console.log('▸ escHtml');
+assertEqual(escHtml('<script>alert("xss")</script>'), '&lt;script&gt;alert("xss")&lt;/script&gt;', 'escHtml blocks script tags');
+assertEqual(escHtml('A & B'), 'A &amp; B', 'escHtml escapes ampersand');
+assertEqual(escHtml(null), '', 'escHtml null returns empty');
+assertEqual(escHtml(''), '', 'escHtml empty returns empty');
+assertEqual(escHtml('Normal text'), 'Normal text', 'escHtml passes normal text');
+
+console.log('▸ escAttr');
+assertEqual(escAttr('"quoted"'), '&quot;quoted&quot;', 'escAttr double quotes');
+assertEqual(escAttr("it's"), "it&#39;s", 'escAttr single quotes');
+assertEqual(escAttr('<tag>'), '&lt;tag&gt;', 'escAttr angle brackets');
+assertEqual(escAttr('A & B'), 'A &amp; B', 'escAttr ampersand');
+assertEqual(escAttr(null), '', 'escAttr null');
+assertEqual(escAttr('x"y\'z<w>&v'), 'x&quot;y&#39;z&lt;w&gt;&amp;v', 'escAttr all specials combined');
+
+console.log('▸ buildPageText');
+// Mock textContent like pdf.js returns
+var mockTC1 = {
+  items: [
+    { str: 'Hello', transform: [1, 0, 0, 1, 10, 100] },
+    { str: 'World', transform: [1, 0, 0, 1, 80, 100] },
+    { str: 'Line2', transform: [1, 0, 0, 1, 10, 50] },
+  ]
+};
+var pageText1 = buildPageText(mockTC1);
+assert(pageText1.indexOf('Hello') >= 0 && pageText1.indexOf('World') >= 0, 'buildPageText has both words on same line');
+assert(pageText1.indexOf('Hello') < pageText1.indexOf('World'), 'buildPageText sorts by x within line');
+assert(pageText1.indexOf('Hello World') >= 0, 'buildPageText joins items on same Y');
+var lines1 = pageText1.split('\n');
+assertEqual(lines1.length, 2, 'buildPageText produces 2 lines for 2 Y levels');
+assertEqual(lines1[0], 'Hello World', 'buildPageText first line (higher Y = top)');
+assertEqual(lines1[1], 'Line2', 'buildPageText second line (lower Y = bottom)');
+
+// Empty textContent
+var mockTCEmpty = { items: [] };
+assertEqual(buildPageText(mockTCEmpty), '', 'buildPageText empty items');
+
+// Items with no transform are skipped
+var mockTCNoTransform = { items: [{ str: 'NoPos' }] };
+assertEqual(buildPageText(mockTCNoTransform), '', 'buildPageText skips items without transform');
+
+// Whitespace-only items are filtered
+var mockTCWhitespace = { items: [{ str: '   ', transform: [1, 0, 0, 1, 10, 100] }, { str: 'Real', transform: [1, 0, 0, 1, 50, 100] }] };
+assertEqual(buildPageText(mockTCWhitespace), 'Real', 'buildPageText filters whitespace-only items');
+
+console.log('▸ Config constants');
+assertEqual(WORKER_URL, 'lib/pdf.worker.min.js', 'Worker URL is local');
+assert(typeof PDF_LOAD_TIMEOUT_MS === 'number' && PDF_LOAD_TIMEOUT_MS > 0, 'PDF_LOAD_TIMEOUT_MS is positive number');
+assert(PDF_LOAD_TIMEOUT_MS >= 10000 && PDF_LOAD_TIMEOUT_MS <= 60000, 'PDF_LOAD_TIMEOUT_MS in reasonable range (10-60s)');
+
+console.log('▸ COLUMNS/XLSX alignment');
+// COLUMNS and XLSX_EXPORT_COLUMNS should share the same keys (except fileName and awbLunaAn)
+var colKeySet = new Set(COLUMNS.map(function(c) { return c.key; }));
+var xlsxKeySet = new Set(XLSX_EXPORT_COLUMNS.map(function(c) { return c.key; }));
+// All COLUMNS keys should be in XLSX export
+COLUMNS.forEach(function(c) {
+  assert(xlsxKeySet.has(c.key), 'COLUMNS key "' + c.key + '" exists in XLSX_EXPORT_COLUMNS');
+});
+// XLSX has fileName which COLUMNS doesn't (it's rendered separately)
+assert(xlsxKeySet.has('fileName'), 'XLSX has fileName column');
+assert(!colKeySet.has('fileName'), 'COLUMNS does not have fileName (rendered separately)');
+// Both have same non-fileName shared ordering
+var xlsxDataKeys = XLSX_EXPORT_COLUMNS.filter(function(c) { return c.key !== 'fileName'; }).map(function(c) { return c.key; });
+var colDataKeys = COLUMNS.map(function(c) { return c.key; });
+assertEqual(JSON.stringify(xlsxDataKeys), JSON.stringify(colDataKeys), 'COLUMNS and XLSX (excl fileName) have same order');
 
 // ─── RESULTS ────────────────────────────────────────────────────────────────
 console.log('\n═══════════════════════════════════════════════');
