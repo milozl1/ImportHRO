@@ -314,9 +314,8 @@ function parseFields(rawText) {
   if (!f.nrFactura) warnings.push("Factura missing");
 
   // 9) Cod TARIC
-  const taricMatch = text.match(patterns.codTaric);
-  if (taricMatch) f.codTaric = taricMatch[1].trim();
-  else warnings.push("Cod TARIC missing");
+  f.codTaric = extractCodTaric(text);
+  if (!f.codTaric) warnings.push("Cod TARIC missing");
 
   // 10) Regim unificat
   f.regimUnificat = extractRegimUnificat(text);
@@ -469,6 +468,23 @@ function extractFactura(text) {
   return "";
 }
 
+function extractCodTaric(text) {
+  // Extract every TARIC/HS code occurrence, keep insertion order and drop duplicates.
+  const taricRe = /Cod\s+TARIC\s+unificat\s+([0-9][0-9\s]{5,19})/gi;
+  const uniqueCodes = [];
+  const seen = new Set();
+
+  for (const match of text.matchAll(taricRe)) {
+    const code = (match[1] || "").replace(/\s+/g, "").trim();
+    if (!/^\d{6,10}$/.test(code)) continue;
+    if (seen.has(code)) continue;
+    seen.add(code);
+    uniqueCodes.push(code);
+  }
+
+  return uniqueCodes.join("; ");
+}
+
 function extractRegimUnificat(text) {
   const m = text.match(patterns.regimUnificat);
   return m ? m[1].trim() : "";
@@ -515,6 +531,44 @@ const COLUMNS = [
   { key: "preferinte", label: "Preferințe" },
   { key: "gratis", label: "Gratis", type: "select", options: ["NU", "DA"] },
 ];
+
+const XLSX_EXPORT_COLUMNS = [
+  { key: "awb", label: "AWB" },
+  { key: "exportator", label: "Exportator" },
+  { key: "taraExp", label: "Țara Exp." },
+  { key: "nrFactura", label: "Nr. Factură" },
+  { key: "valoare", label: "Valoare Marfă" },
+  { key: "moneda", label: "Moneda" },
+  { key: "dvi", label: "MRN" },
+  { key: "dataMRN", label: "Data MRN" },
+  { key: "codTaric", label: "Cod TARIC" },
+  { key: "regimUnificat", label: "Regim unificat" },
+  { key: "preferinte", label: "Preferințe" },
+  { key: "fileName", label: "Fișier" },
+  { key: "locatie", label: "Locație" },
+  { key: "gratis", label: "Gratis" },
+];
+
+function buildXlsxExportData(rows) {
+  var headers = ["#"];
+  XLSX_EXPORT_COLUMNS.forEach(function (col) {
+    headers.push(col.label);
+  });
+
+  var data = rows.map(function (row, i) {
+    var f = row.fields || emptyFields();
+    var rowData = [i + 1];
+
+    XLSX_EXPORT_COLUMNS.forEach(function (col) {
+      var value = col.key === "fileName" ? row.fileName : f[col.key];
+      rowData.push(value != null ? value : "");
+    });
+
+    return rowData;
+  });
+
+  return { headers: headers, data: data };
+}
 
 // ─── RENDER PREVIEW TABLE ───────────────────────────────────────────────────
 function renderPreview(rows) {
@@ -727,38 +781,25 @@ function exportXlsx(rows) {
   // Defer heavy XLSX work so the browser can repaint the button first
   setTimeout(function () {
     try {
-      var headers = ["#", "Fișier"];
-      COLUMNS.forEach(function (c) {
-        headers.push(c.label);
-      });
-
-      var data = rows.map(function (row, i) {
-        var f = row.fields || emptyFields();
-        var rowData = [i + 1, row.fileName];
-        COLUMNS.forEach(function (c) {
-          var v = f[c.key];
-          rowData.push(v != null ? v : "");
-        });
-        return rowData;
-      });
-
-      var ws = XLSX.utils.aoa_to_sheet([headers].concat(data));
+      var exportData = buildXlsxExportData(rows);
+      var ws = XLSX.utils.aoa_to_sheet(
+        [exportData.headers].concat(exportData.data),
+      );
       ws["!cols"] = [
         { wch: 4 },
-        { wch: 35 },
+        { wch: 24 },
+        { wch: 34 },
+        { wch: 10 },
+        { wch: 24 },
+        { wch: 14 },
+        { wch: 10 },
         { wch: 24 },
         { wch: 12 },
-        { wch: 18 },
-        { wch: 30 },
-        { wch: 8 },
-        { wch: 8 },
-        { wch: 14 },
-        { wch: 22 },
-        { wch: 22 },
+        { wch: 28 },
         { wch: 14 },
         { wch: 14 },
+        { wch: 35 },
         { wch: 20 },
-        { wch: 12 },
         { wch: 8 },
       ];
 
@@ -864,9 +905,12 @@ if (typeof module !== "undefined" && module.exports) {
     extractTaraExp,
     extractAwbLunaAn,
     extractFactura,
+    extractCodTaric,
     extractLocatie,
     extractRegimUnificat,
     COLUMNS,
+    XLSX_EXPORT_COLUMNS,
+    buildXlsxExportData,
     extractPreferinte: function (text) {
       var m = text.match(patterns.preferinte);
       return m ? m[1].trim() : "";

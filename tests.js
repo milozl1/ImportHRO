@@ -18,7 +18,8 @@ global.document = doc;
 const {
   normalizeText, parseFields, emptyFields, patterns, ro,
   extractAWB, extractExportator, extractTaraExp, extractAwbLunaAn,
-  extractFactura, extractLocatie, extractRegimUnificat, COLUMNS,
+  extractFactura, extractCodTaric, extractLocatie, extractRegimUnificat, COLUMNS,
+  XLSX_EXPORT_COLUMNS, buildXlsxExportData,
   extractPreferinte
 } = require('./app.js');
 
@@ -268,6 +269,14 @@ Cod TARIC unificat 3926909790
 Preferințe - [14 11] 200
 Regim unificat 4000`;
 
+// PDF8: multiple TARIC lines with duplicates
+const PDF8_MULTI_TARIC = `DECLARAȚIE VAMALĂ DE IMPORT
+MRN 26ROTM87300008A1R5 17/02/2026
+Cod TARIC unificat 8536693000
+Cod TARIC unificat 8536693000
+Cod TARIC unificat 3810100000
+Regim unificat 4000`;
+
 console.log('═══════════════════════════════════════════════');
 console.log('  Running automated tests for app.js');
 console.log('═══════════════════════════════════════════════\n');
@@ -445,6 +454,14 @@ assertEqual(f7.locatie, 'TIMISOARA', 'PDF7 Locație');
 assertEqual(f7.preferinte, '200', 'PDF7 Preferințe');
 assertEqual(f7.gratis, 'NU', 'PDF7 Gratis');
 
+// ─── TEST GROUP: PDF8 – Multiple TARIC values (unique) ─────────────────────
+console.log('▸ PDF8 – Multiple TARIC values (unique)');
+const r8 = parseFields(PDF8_MULTI_TARIC);
+const f8 = r8.fields;
+
+assertEqual(f8.dvi, '26ROTM87300008A1R5', 'PDF8 MRN');
+assertEqual(f8.codTaric, '8536693000; 3810100000', 'PDF8 TARIC values merged and deduplicated');
+
 // ─── TEST GROUP: Individual extractors ──────────────────────────────────────
 console.log('▸ extractAWB');
 assertEqual(extractAWB(PDF1_TEXT), '6646529444', 'extractAWB PDF1 (N740)');
@@ -498,6 +515,13 @@ assertEqual(extractFactura(PDF3_CEDILLA), 'INV-2026-001', 'extractFactura PDF3')
 assertEqual(extractFactura(PDF6_MULTI_COMMA), 'NL26020303, -304', 'extractFactura PDF6 (comma-separated)');
 assertEqual(extractFactura(PDF7_MULTI_SEMICOLON), '20199698; 20200760', 'extractFactura PDF7 (semicolon-separated)');
 assertEqual(extractFactura('no invoices here'), '', 'extractFactura empty on no match');
+
+console.log('▸ extractCodTaric');
+assertEqual(extractCodTaric(PDF1_TEXT), '8536693000', 'extractCodTaric PDF1 single value');
+assertEqual(extractCodTaric(PDF8_MULTI_TARIC), '8536693000; 3810100000', 'extractCodTaric deduplicates and preserves order');
+const taricWithSpaces = `Cod TARIC unificat 8536 693000\nCod TARIC unificat 8536693000\nCod TARIC unificat 3810 100000`;
+assertEqual(extractCodTaric(taricWithSpaces), '8536693000; 3810100000', 'extractCodTaric normalizes spaces inside code');
+assertEqual(extractCodTaric('fara coduri TARIC'), '', 'extractCodTaric empty on no match');
 
 console.log('▸ extractLocatie');
 assertEqual(extractLocatie(PDF1_TEXT), 'GHIRODA', 'extractLocatie PDF1');
@@ -598,6 +622,72 @@ const efKeys = Object.keys(emptyFields());
 COLUMNS.forEach(function(c) {
   assert(efKeys.includes(c.key), 'emptyFields contains key: ' + c.key);
 });
+
+// ─── TEST GROUP: XLSX export column order ──────────────────────────────────
+console.log('▸ XLSX export column order');
+const sampleRows = [
+  {
+    fileName: 'sample-file.pdf',
+    fields: {
+      dvi: '26ROTM87300008A1R5',
+      dataMRN: '17/02/2026',
+      awb: '6646529444',
+      exportator: 'PRECI-DIP SA',
+      taraExp: 'CH',
+      moneda: 'EUR',
+      valoare: 8802.5,
+      awbLunaAn: 'AWB - Februarie 2026',
+      nrFactura: '90022227',
+      codTaric: '8536693000; 3810100000',
+      regimUnificat: '4000',
+      locatie: 'GHIRODA',
+      preferinte: '300',
+      gratis: 'NU',
+    },
+  },
+];
+
+const xlsxData = buildXlsxExportData(sampleRows);
+const expectedHeaders = [
+  '#',
+  'AWB',
+  'Exportator',
+  'Țara Exp.',
+  'Nr. Factură',
+  'Valoare Marfă',
+  'Moneda',
+  'MRN',
+  'Data MRN',
+  'Cod TARIC',
+  'Regim unificat',
+  'Preferințe',
+  'Fișier',
+  'Locație',
+  'Gratis',
+];
+
+assertEqual(JSON.stringify(xlsxData.headers), JSON.stringify(expectedHeaders), 'XLSX headers match required order');
+assertEqual(xlsxData.data.length, 1, 'XLSX data has one row');
+assertEqual(xlsxData.data[0][0], 1, 'XLSX column A is #');
+assertEqual(xlsxData.data[0][1], '6646529444', 'XLSX column B is AWB');
+assertEqual(xlsxData.data[0][2], 'PRECI-DIP SA', 'XLSX column C is Exportator');
+assertEqual(xlsxData.data[0][3], 'CH', 'XLSX column D is Țara Exp.');
+assertEqual(xlsxData.data[0][4], '90022227', 'XLSX column E is Nr. Factură');
+assertEqual(xlsxData.data[0][5], 8802.5, 'XLSX column F is Valoare Marfă');
+assertEqual(xlsxData.data[0][6], 'EUR', 'XLSX column G is Moneda');
+assertEqual(xlsxData.data[0][7], '26ROTM87300008A1R5', 'XLSX column H is MRN');
+assertEqual(xlsxData.data[0][8], '17/02/2026', 'XLSX column I is Data MRN');
+assertEqual(xlsxData.data[0][9], '8536693000; 3810100000', 'XLSX column J is Cod TARIC with semicolon delimiter');
+assertEqual(xlsxData.data[0][10], '4000', 'XLSX column K is Regim unificat');
+assertEqual(xlsxData.data[0][11], '300', 'XLSX column L is Preferințe');
+assertEqual(xlsxData.data[0][12], 'sample-file.pdf', 'XLSX column M is Fișier');
+assertEqual(xlsxData.data[0][13], 'GHIRODA', 'XLSX column N is Locație');
+assertEqual(xlsxData.data[0][14], 'NU', 'XLSX column O is Gratis');
+
+assertEqual(XLSX_EXPORT_COLUMNS.length, 14, 'XLSX_EXPORT_COLUMNS has 14 data columns');
+assertEqual(XLSX_EXPORT_COLUMNS[0].key, 'awb', 'XLSX first data column key is awb');
+assertEqual(XLSX_EXPORT_COLUMNS[11].key, 'fileName', 'XLSX includes fileName in column M position');
+assertEqual(XLSX_EXPORT_COLUMNS[13].key, 'gratis', 'XLSX last data column key is gratis');
 
 // ─── TEST GROUP: Cross-field consistency ────────────────────────────────────
 console.log('▸ Cross-field consistency');
