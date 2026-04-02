@@ -147,18 +147,21 @@ document.addEventListener("DOMContentLoaded", () => {
     // This avoids ALL corporate proxy / Tracking Prevention / CSP issues.
     //
     // How it works:
-    //  1. Set workerSrc to a non-empty string (pdf.js v3 validates this).
-    //  2. Override window.Worker so new Worker() throws → pdf.js catches
+    //  1. Override window.Worker so new Worker() throws → pdf.js catches
     //     the error and falls back to _setupFakeWorker() (main-thread).
-    //  3. disableWorker:true alone does NOT work in pdf.js v3.
-    //  4. A no-op blob worker hangs forever (worker never sends "ready").
-    pdfjsLib.GlobalWorkerOptions.workerSrc = "disabled";
+    //  2. _setupFakeWorker loads workerSrc as a <script> tag (NOT Worker).
+    //     If window.pdfjsWorker is already set (inlined build), it skips
+    //     the script load entirely.
+    //  3. For index.html: workerSrc = "lib/pdf.worker.min.js" (loaded via <script>).
+    //     For ImportHRO.html: pdf.worker.min.js is inlined so pdfjsWorker exists.
     if (typeof window !== "undefined") {
       window.Worker = function PdfJsWorkerDisabled() {
         throw new Error("Worker disabled — using main-thread parsing");
       };
     }
-    console.log("[app.js] pdfjsLib version:", pdfjsLib.version, "(fake-worker / main-thread mode)");
+    pdfjsLib.GlobalWorkerOptions.workerSrc = "lib/pdf.worker.min.js";
+    console.log("[app.js] pdfjsLib version:", pdfjsLib.version,
+      "(fake-worker mode, pdfjsWorker pre-loaded:", typeof window !== "undefined" && !!window.pdfjsWorker, ")");
   }
   setupDropZone();
   setupButtons();

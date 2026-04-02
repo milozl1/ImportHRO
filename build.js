@@ -19,6 +19,7 @@ console.log("[build] Reading source files…");
 
 const css = read("styles.css");
 const pdfJs = read("lib/pdf.min.js");
+const pdfWorkerJs = read("lib/pdf.worker.min.js");
 const xlsxJs = read("lib/xlsx.full.min.js");
 const jszipJs = read("lib/jszip.min.js");
 const appJs = read("app.js");
@@ -100,6 +101,11 @@ ${css}
 <!-- pdf.js (inlined) -->
 <script>
 ${pdfJs}
+</script>
+
+<!-- pdf.js worker (inlined for fake-worker main-thread mode) -->
+<script>
+${pdfWorkerJs}
 </script>
 
 <!-- SheetJS (inlined) -->
