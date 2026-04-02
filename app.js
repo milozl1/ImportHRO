@@ -114,45 +114,17 @@ async function drainFileQueue() {
 }
 
 // ─── INIT ───────────────────────────────────────────────────────────────────
-const WORKER_CDN_URL =
-  "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+const WORKER_URL = "lib/pdf.worker.min.js";
 const PDF_LOAD_TIMEOUT_MS = 15000;
 
 document.addEventListener("DOMContentLoaded", () => {
   if (typeof pdfjsLib !== "undefined") {
-    // Set CDN URL immediately so it's always available as fallback.
-    pdfjsLib.GlobalWorkerOptions.workerSrc = WORKER_CDN_URL;
-    // Then try to upgrade to a same-origin blob URL in the background.
-    // This bypasses cross-origin Worker restrictions and Tracking Prevention
-    // that can cause getDocument() to hang indefinitely on some corporate networks.
-    preloadWorkerAsBlob();
+    pdfjsLib.GlobalWorkerOptions.workerSrc = WORKER_URL;
     console.log("[app.js] Initialized. pdfjsLib version:", pdfjsLib.version);
   }
   setupDropZone();
   setupButtons();
 });
-
-async function preloadWorkerAsBlob() {
-  try {
-    var t0 = performance.now();
-    var resp = await fetch(WORKER_CDN_URL);
-    if (!resp.ok) throw new Error("HTTP " + resp.status);
-    var code = await resp.text();
-    var blob = new Blob([code], { type: "application/javascript" });
-    pdfjsLib.GlobalWorkerOptions.workerSrc = URL.createObjectURL(blob);
-    console.log(
-      "[app.js] Worker upgraded to same-origin blob URL in",
-      Math.round(performance.now() - t0),
-      "ms",
-    );
-  } catch (e) {
-    console.warn(
-      "[app.js] Worker blob pre-load failed:",
-      e.message,
-      "— using CDN URL directly (may be slow on restricted networks)",
-    );
-  }
-}
 
 // ─── DROP ZONE & FILE INPUT ─────────────────────────────────────────────────
 function setupDropZone() {
@@ -321,23 +293,27 @@ async function extractPdfText(file, onPageProcessed) {
     // ── Load PDF with timeout to catch worker hangs ──────────────────────
     var loadT0 = performance.now();
     var loadingTask = pdfjsLib.getDocument({ data: arrayBuf });
-    var timedOut = false;
 
-    var loadTimer = setTimeout(function () {
-      timedOut = true;
-      loadingTask.destroy().catch(function () {});
-    }, PDF_LOAD_TIMEOUT_MS);
+    // Promise.race guarantees we never hang even if the Worker is broken.
+    var timeoutPromise = new Promise(function (_, reject) {
+      setTimeout(function () {
+        reject(new Error("TIMEOUT"));
+      }, PDF_LOAD_TIMEOUT_MS);
+    });
 
     try {
-      pdf = await loadingTask.promise;
+      pdf = await Promise.race([loadingTask.promise, timeoutPromise]);
     } catch (loadErr) {
-      if (timedOut) {
+      // Kill the stuck loading task regardless.
+      loadingTask.destroy().catch(function () {});
+
+      if (loadErr.message === "TIMEOUT") {
         console.warn(
           "[app.js]",
           file.name,
           "— PDF load timed out after",
           PDF_LOAD_TIMEOUT_MS,
-          "ms. Worker may be blocked. Retrying without worker…",
+          "ms. Retrying without worker…",
         );
         // Re-read buffer in case the original was transferred to the dead worker.
         arrayBuf = await file.arrayBuffer();
@@ -355,8 +331,6 @@ async function extractPdfText(file, onPageProcessed) {
       } else {
         throw loadErr;
       }
-    } finally {
-      clearTimeout(loadTimer);
     }
 
     console.log(
