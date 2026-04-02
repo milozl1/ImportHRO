@@ -232,6 +232,7 @@ header p {
 .status-done      { background: var(--success); }
 .status-warning   { background: var(--warning); }
 .status-error     { background: var(--error); }
+.status-skipped   { background: #94a3b8; }
 
 @keyframes pulse { from { opacity: 1; } to { opacity: .5; } }
 
@@ -250,6 +251,7 @@ header p {
 .badge-done       { background: #dcfce7; color: var(--success); }
 .badge-warning    { background: #fef3c7; color: #92400e; }
 .badge-error      { background: #fee2e2; color: var(--error); }
+.badge-skipped    { background: #f1f5f9; color: #64748b; }
 
 /* ===== PREVIEW TABLE ===== */
 .table-wrap {

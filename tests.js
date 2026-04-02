@@ -18,7 +18,8 @@ global.document = doc;
 const {
   normalizeText, parseFields, emptyFields, patterns, ro,
   extractAWB, extractExportator, extractTaraExp, extractAwbLunaAn,
-  extractFactura, extractCodTaric, extractLocatie, extractRegimUnificat, COLUMNS,
+  extractFactura, extractCodTaric, extractLocatie, extractRegimUnificat,
+  extractCUI, EXPECTED_CUI, COLUMNS,
   XLSX_EXPORT_COLUMNS, buildXlsxExportData,
   extractPreferinte,
   isPdfFile, fileFingerprint, escHtml, escAttr, buildPageText,
@@ -790,6 +791,52 @@ assert(!colKeySet.has('fileName'), 'COLUMNS does not have fileName (rendered sep
 var xlsxDataKeys = XLSX_EXPORT_COLUMNS.filter(function(c) { return c.key !== 'fileName'; }).map(function(c) { return c.key; });
 var colDataKeys = COLUMNS.map(function(c) { return c.key; });
 assertEqual(JSON.stringify(xlsxDataKeys), JSON.stringify(colDataKeys), 'COLUMNS and XLSX (excl fileName) have same order');
+
+// ─── extractCUI ─────────────────────────────────────────────────────────────
+console.log('▸ extractCUI');
+assertEqual(EXPECTED_CUI, 'RO1629090', 'EXPECTED_CUI constant is RO1629090');
+
+// CUI in Declarantul section
+assertEqual(
+  extractCUI(normalizeText('Declarantul/Reprezentantul - [13 14]\nNumele DHL EXPRESS ROMANIA SRL\nRO1629090\nAdresa Str Test')),
+  'RO1629090',
+  'extractCUI finds CUI in Declarantul section'
+);
+
+// CUI in Importatorul section (fallback)
+assertEqual(
+  extractCUI(normalizeText('Importatorul - [13 04]\nNumele FIRMA SRL\nRO1629090\nOrasul Bucuresti')),
+  'RO1629090',
+  'extractCUI falls back to Importatorul section'
+);
+
+// Different CUI
+assertEqual(
+  extractCUI(normalizeText('Declarantul/Reprezentantul - [13 14]\nNumele ALTA FIRMA SRL\nRO9876543\nAdresa Str X')),
+  'RO9876543',
+  'extractCUI extracts different CUI'
+);
+
+// CUI with space between RO and digits
+assertEqual(
+  extractCUI(normalizeText('Declarantul/Reprezentantul - [13 14]\nRO 1629090\nAdresa')),
+  'RO1629090',
+  'extractCUI handles space between RO and digits'
+);
+
+// No CUI found
+assertEqual(
+  extractCUI(normalizeText('Some random text without declarant section')),
+  '',
+  'extractCUI returns empty for text without CUI'
+);
+
+// No Declarant section but CUI in Importator
+assertEqual(
+  extractCUI(normalizeText('Other stuff\nImportatorul - [13 04]\nRO1629090\nMore stuff')),
+  'RO1629090',
+  'extractCUI finds CUI in importator when no declarant section'
+);
 
 // ─── RESULTS ────────────────────────────────────────────────────────────────
 console.log('\n═══════════════════════════════════════════════');

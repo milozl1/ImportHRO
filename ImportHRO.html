@@ -239,6 +239,7 @@ header p {
 .status-done      { background: var(--success); }
 .status-warning   { background: var(--warning); }
 .status-error     { background: var(--error); }
+.status-skipped   { background: #94a3b8; }
 
 @keyframes pulse { from { opacity: 1; } to { opacity: .5; } }
 
@@ -257,6 +258,7 @@ header p {
 .badge-done       { background: #dcfce7; color: var(--success); }
 .badge-warning    { background: #fef3c7; color: #92400e; }
 .badge-error      { background: #fee2e2; color: var(--error); }
+.badge-skipped    { background: #f1f5f9; color: #64748b; }
 
 /* ===== PREVIEW TABLE ===== */
 .table-wrap {
@@ -553,7 +555,11 @@ const patterns = {
   ),
   regimUnificat: /Regim\s+unificat\s+(\d{4})/i,
   preferinte: ro("Preferințe\\s*-\\s*\\[14\\s*11\\]\\s+(\\d+)"),
+  declarantSection: ro("Declarantul\\/?\\s*Reprezentantul\\s*-\\s*\\[13\\s*14\\]"),
 };
+
+// ─── CUI FILTER ─────────────────────────────────────────────────────────────
+const EXPECTED_CUI = "RO1629090";
 
 const MONTHS_RO = [
   "Ianuarie",
@@ -572,6 +578,7 @@ const MONTHS_RO = [
 
 // ─── STATE ──────────────────────────────────────────────────────────────────
 let fileRows = [];
+let skippedRows = [];
 let processingInProgress = false;
 let abortProcessing = false;
 let queuedFiles = [];
@@ -772,7 +779,20 @@ async function readFiles(files) {
       const result = parseFields(text);
       item.fields = result.fields;
       item.warnings = result.warnings;
-      item.status = result.warnings.length ? "warning" : "done";
+
+      // ── CUI validation: skip files not belonging to expected company ──
+      var cui = extractCUI(normalizeText(text));
+      if (cui && cui !== EXPECTED_CUI) {
+        item.status = "skipped";
+        item.skipped = true;
+        item.warnings = ["CUI declarat: " + cui + " (expected " + EXPECTED_CUI + ") — fișier ignorat"];
+        diagLog("SKIP: " + item.fileName + " — CUI " + cui + " ≠ " + EXPECTED_CUI);
+      } else if (!cui) {
+        item.status = result.warnings.length ? "warning" : "done";
+        item.warnings.push("CUI declarant nedetectat — se procesează oricum");
+      } else {
+        item.status = result.warnings.length ? "warning" : "done";
+      }
     } catch (err) {
       console.error("[app.js] Error processing", item.fileName, err);
       diagLog("ERROR: " + item.fileName + " — " + err.message);
@@ -784,14 +804,22 @@ async function readFiles(files) {
       text = "";
     }
     setFileStatus(safeId, item.status);
-    fileRows.push(item);
+    if (!item.skipped) {
+      fileRows.push(item);
+    } else {
+      skippedRows.push(item);
+    }
     progressFill.style.width = `${((i + 1) / total) * 100}%`;
   }
 
   var totalSec = ((performance.now() - batchT0) / 1000).toFixed(1);
-  progressText.textContent = `Done — ${total} file(s) processed in ${totalSec}s.`;
+  var skippedCount = newItems.filter(function (it) { return it.skipped; }).length;
+  var processedCount = total - skippedCount;
+  progressText.textContent = `Done — ${processedCount} file(s) processed` +
+    (skippedCount ? `, ${skippedCount} skipped (CUI differs)` : "") +
+    ` in ${totalSec}s.`;
   renderPreview(fileRows);
-  renderWarnings(fileRows);
+  renderWarnings(fileRows.concat(skippedRows));
   document.getElementById("btn-export").disabled = false;
   var zipBtn = document.getElementById("btn-zip");
   if (zipBtn) zipBtn.disabled = false;
@@ -1226,6 +1254,25 @@ function extractRegimUnificat(text) {
   return m ? m[1].trim() : "";
 }
 
+function extractCUI(text) {
+  // Look in Declarantul/Reprezentantul section [13 14]
+  var declIdx = text.search(patterns.declarantSection);
+  if (declIdx >= 0) {
+    var win = text.substring(declIdx, declIdx + 600);
+    // CUI format: RO followed by digits (e.g. RO1629090)
+    var cuiMatch = win.match(/\bRO\s*(\d{5,10})\b/);
+    if (cuiMatch) return "RO" + cuiMatch[1];
+  }
+  // Fallback: also check Importatorul section [13 04]
+  var impIdx = text.search(patterns.importatorSection);
+  if (impIdx >= 0) {
+    var win2 = text.substring(impIdx, impIdx + 600);
+    var cuiMatch2 = win2.match(/\bRO\s*(\d{5,10})\b/);
+    if (cuiMatch2) return "RO" + cuiMatch2[1];
+  }
+  return "";
+}
+
 function extractLocatie(text) {
   // Find Importatorul section and extract Orașul (city)
   // Note: don't use ro() here because Ora[sș]ul already contains ș in a char class
@@ -1625,7 +1672,13 @@ function clearAll() {
     row.fields = null;
     row.warnings = null;
   });
+  skippedRows.forEach(function (row) {
+    row.file = null;
+    row.fields = null;
+    row.warnings = null;
+  });
   fileRows = [];
+  skippedRows = [];
   queuedFiles = [];
   seenFileFingerprints = new Set();
   document.getElementById("file-list").innerHTML = "";
@@ -1681,6 +1734,8 @@ if (typeof module !== "undefined" && module.exports) {
     extractCodTaric,
     extractLocatie,
     extractRegimUnificat,
+    extractCUI,
+    EXPECTED_CUI,
     COLUMNS,
     XLSX_EXPORT_COLUMNS,
     buildXlsxExportData,
